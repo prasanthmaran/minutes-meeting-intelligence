@@ -1,0 +1,159 @@
+# Minutes — Meeting Intelligence
+
+A focused meeting workspace: upload a timestamped transcript, inspect the conversation, and ask questions with clickable source evidence. Built for assignment Option 3.
+
+**Status:** Local MVP. Automatic meeting attendance, calendar integration, and voice transcription are not implemented. This is a single-user development app, with no authentication; do not expose it publicly as-is.
+
+## Quick start
+
+### Local development (SQLite; no Docker required)
+
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and Node.js 22+.
+
+```bash
+cd meeting-intelligence
+cp .env.example .env
+cd backend
+uv sync --frozen
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+In another terminal:
+
+```bash
+cd meeting-intelligence/frontend
+npm ci
+npm run dev
+```
+
+Open http://localhost:5173. Vite proxies `/api` to the backend. SQLite persists to `backend/meeting.db`; startup creates its development schema. PostgreSQL uses Alembic migrations, run automatically by the API container. Run only **one API process** for this MVP: its embedded worker recovers interrupted work on startup.
+
+### Enable AI generation
+
+Set `AI_MODE=openai` and `OPENAI_API_KEY` in the project-root `.env`, then restart the backend. Upload a new transcript or select **Meeting options → Reprocess meeting**; reprocessing clears previous notes and chat history. The key stays on the backend. Transcript contents and questions are sent to OpenAI in this mode.
+
+Demo mode is the default and requires no key. It returns matching transcript excerpts, not generated summaries or conversational answers. Click **Explore a sample** to try it.
+
+### Optional container setup
+
+Docker is not needed for local development. The existing `compose.yaml` packages PostgreSQL/pgvector, the API, and frontend for later use. With a running Docker daemon, `docker compose up --build` serves the app at http://localhost:8080. This path has not been runtime-verified here.
+
+## Features
+
+- UTF-8 `.txt` upload, with line-specific timestamp/format errors and bounded input size.
+- Meeting library, processing states, retry, and deletion of associated chunks and chat.
+- Speaker-labelled transcript viewer and source evidence panel.
+- AI mode: structured summaries, confirmed decisions, action items, unresolved questions, and conversational answers.
+- Evidence citations validated against the actual retrieved context.
+- Missing action owners/deadlines displayed as “Not specified.”
+- Persistent conversation history and bounded follow-up query rewriting in AI mode.
+- Markdown notes export, including supporting transcript passages.
+- Explicit offline demo, sample transcript, request IDs, provider usage logs, tests, and containers.
+
+Supported input (one speaker turn per line; blank lines allowed):
+
+```text
+[00:00] Maya: Let's review the launch.
+[00:35] Sam: I will finish the security review by November 10.
+[01:02:15] Maya: We agreed to launch only after the review passes.
+```
+
+Limits: 250 KB encoded upload, 60,000 decoded characters, 6,000 characters per turn, chronological timestamps. The displayed duration is the **last recorded timestamp**, not a measured recording length. Dates mentioned in speech remain as spoken; the app does not invent a year or resolve relative deadlines.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI[React + TypeScript] --> API[FastAPI]
+  API --> DB[(PostgreSQL + pgvector)]
+  DB --> Worker[Embedded queue worker]
+  Worker --> Parse[Speaker turns → overlapping chunks]
+  Parse --> Embed[Embedding provider]
+  Embed --> DB
+  Parse --> Notes[Structured note extraction]
+  Notes --> DB
+  API --> Retrieve[Meeting-scoped hybrid retrieval]
+  Retrieve --> DB
+  Retrieve --> LLM[Structured answer generation]
+  LLM --> Validate[Citation validation]
+  Validate --> UI
+```
+
+One frontend, one backend process, one database. No agent framework or separate vector service. `app/ai.py` owns provider calls; `transcripts.py` owns parsing/chunking; `intelligence.py` owns retrieval/validation; `worker.py` owns ingestion; `main.py` owns HTTP boundaries. PostgreSQL and SQLite use the same SQLAlchemy models with a dialect-specific embedding column.
+
+Uploads return `202` with a queued meeting. The worker claims queued rows, generates embeddings/notes, and commits the result atomically. Failures roll back partially generated chunks and mark the meeting failed. Queued rows survive restarts; interrupted processing becomes retryable. The UI polls while work is active. This worker is intentionally single-process, not a production distributed job system.
+
+## RAG and LLM decisions implemented
+
+| Area | Implementation and trade-off |
+|---|---|
+| Chunking | Whole speaker turns, ~1,800 character target, one turn overlap. Preserves attribution and adjacent discussion; characters are a simple approximation, not token-accurate. Oversized turns remain intact within the 6,000-character limit. |
+| Embeddings | `text-embedding-3-small`, explicitly 1,536 dimensions. One hosted provider simplifies setup. Local embeddings would remove embedding API costs but add model download/runtime management. |
+| LLM | Configurable `gpt-4o-mini` default for structured extraction/answers. This is a starting configuration, not a claim that it wins a model benchmark. Evaluate on your transcripts before selecting a final model. |
+| Vector storage | pgvector alongside relational data. Pinecone/Qdrant would add an operational dependency this corpus does not yet justify. SQLite performs Python cosine ranking for local development. |
+| Retrieval | BM25-style lexical scores plus semantic cosine ranking, combined by reciprocal rank fusion. Top five chunks, up to 14,000 evidence characters in AI mode. Lexical matching helps names and exact terms; vectors help paraphrases. |
+| Scope | Every retrieval query filters by meeting ID. Cross-meeting questions are not supported. No tenant isolation is claimed: the app has one shared workspace. |
+| Context | Last six messages, each capped at 1,600 characters, inform a standalone query rewrite. Retrieved evidence, not past model responses, is the factual source. |
+| Notes | Extract over batches of six chunks; concatenate and deduplicate exact item text. Covers the full transcript without silently dropping its ending. A later decision in another batch can contradict an earlier one: temporal reconciliation is future work. |
+| Orchestration | Plain Python functions and the provider SDK. Avoids hidden retrieval/prompt behavior and framework overhead. |
+| Guardrails | Structured Pydantic output, nonempty/valid citation IDs for supported claims, explicit insufficient-evidence responses, untrusted-source instructions, no tool execution, bounded requests, timeouts. |
+
+Valid citation IDs do **not** prove that a claim follows from the evidence. Prompt injection and unsupported synthesis remain model risks. The prompt asks the model to distinguish proposals from decisions and avoid invented owners/deadlines; this needs live evaluation, not just schema tests. Demo retrieval can return loosely relevant passages and is not semantic reasoning.
+
+Provider documentation used: [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), [embeddings](https://developers.openai.com/api/docs/guides/embeddings).
+
+## Tests and observability
+
+```bash
+cd backend
+uv run pytest -q
+# In frontend/
+npm test
+npm run build
+```
+
+Backend tests cover format validation, complete chunk coverage/overlap, citation rejection, lexical ranking, meeting isolation, persisted chat, delete cascades, retry cleanup, and provider failure states. Frontend tests cover empty state, honest mode labelling, upload dialog behavior, and API errors. Provider behavior is also tested with doubles; these are **not** live LLM quality evaluations. See `docs/evaluation.md` for human-review cases.
+
+Logs contain request IDs, method, status, latency, meeting IDs, exception type, and provider token counts. They exclude transcript/prompt text and credentials. `GET /api/health` checks database connectivity; it does not spend tokens to probe the model provider. There is no metrics backend or tracing exporter yet.
+
+Engineering practices: typed frontend, validated API bodies and model outputs, separated modules, deterministic tests, pinned dependency lockfiles, migrations, explicit failure states, non-root API container, responsive/keyboard-accessible controls. Skipped: auth, multi-tenant authorization, load tests, a distributed worker, automatic live-provider evals, and a complete accessibility audit.
+
+## Productionization: suggested AWS path
+
+1. Add OIDC sign-in, workspace membership, and server-enforced ownership checks on **every** meeting, source, and chat operation. Add per-user request and token budgets.
+2. Deploy frontend assets behind CloudFront; run the API on ECS/Fargate behind an HTTPS ALB. Run schema migrations as a one-off deployment job.
+3. Use RDS PostgreSQL with pgvector, private networking, connection limits/pooling, encryption, backups, and tested restore procedures. Store large original transcripts in S3 with lifecycle policies.
+4. Replace the embedded worker with SQS and separate ingestion workers. Add job leases, idempotency keys, bounded retries, and a dead-letter queue. Preserve the current separation between provider calls and database writes.
+5. Put API keys in Secrets Manager. Add retention/deletion policies for transcripts, derived data, backups, and the external AI provider. Confirm participant disclosure/consent before adding recording bots.
+6. Add OpenTelemetry/CloudWatch metrics for queue age, processing failures, retrieval latency, provider latency, token cost, and request rate. Redact content by default.
+7. Profile before adding an approximate vector index. Current per-meeting corpora use exact ranking. At scale, test HNSW indexing, filtering behavior, and recall on representative data.
+8. Gate releases with retrieval recall, answer faithfulness, decision-vs-proposal, missing-owner, and prompt-injection evaluations. Version prompts and embedding models; reindex explicitly when they change.
+
+The supplied local database credentials and loopback-bound ports are development configuration, not a deployment security model.
+
+## AI-assisted development and your submission
+
+Implementation, initial tests, UI, and documentation were drafted with Codex. This README describes the delivered implementation and its trade-offs; it is **not** presented as the candidate's personal thought process. Review the code and replace/augment the decision discussion in your own words before submission.
+
+Use `docs/candidate-reflection.md` to record which suggestions you accepted/rejected, which tests you ran, what failed, and why the trade-offs suit your constraints. Do not claim an unrun live-provider evaluation, an unrecorded demo, or a deployment that has not happened.
+
+## With more time
+
+First: authenticated ownership, live quality evaluation, temporal decision reconciliation, and durable independent workers. Next: meeting-bot ingestion with verified webhooks and idempotency, calendar opt-in, audio transcription, cross-meeting decisions, and streaming chat. Automatic meeting attendance should feed the same ingestion contract rather than introduce a second intelligence pipeline.
+
+## Submission materials
+
+- Source: this directory is self-contained and can become its own GitHub repository. Repository publication status is recorded in `docs/verification.md`.
+- Sample: `samples/Atlas beta launch.txt`.
+- Evaluation checklist: `docs/evaluation.md`.
+- Personal reflection prompts: `docs/candidate-reflection.md`.
+- Loom walkthrough outline: `docs/demo-walkthrough.md` (record the video yourself).
+- Verification results: `docs/verification.md`.
+
+## Screenshots
+
+These show the real application in demo mode.
+
+![Meeting workspace](docs/screenshots/workspace.jpg)
+
+![Welcome screen](docs/screenshots/welcome.jpg)
