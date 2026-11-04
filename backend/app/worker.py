@@ -5,7 +5,7 @@ import threading
 
 from sqlalchemy import select, update
 
-from .ai import Provider
+from .ai import Provider, provider_error
 from .db import Chunk, Meeting, uid
 from .intelligence import demo_notes, source, validate_notes
 from .schemas import Notes
@@ -23,8 +23,8 @@ def process_meeting(factory, settings, meeting_id: str):
             turns = meeting.turns
         # Provider calls must not hold a database write lock.
         chunks = [Chunk(id=uid(), meeting_id=meeting_id, **chunk) for chunk in chunk_turns(turns)]
-        provider = Provider(settings) if settings.ai_mode == "openai" else None
-        if provider:
+        provider = Provider(settings) if settings.ai_mode != "demo" else None
+        if settings.ai_mode == "openai":
             embeddings = []
             for offset in range(0, len(chunks), 16):
                 embeddings.extend(provider.embed([c.text for c in chunks[offset : offset + 16]]))
@@ -51,7 +51,9 @@ def process_meeting(factory, settings, meeting_id: str):
             db.add_all(chunks)
             meeting.notes = notes
             meeting.mode = settings.ai_mode
-            meeting.embedding_model = settings.embedding_model if provider else None
+            meeting.embedding_model = (
+                settings.embedding_model if settings.ai_mode == "openai" else None
+            )
             meeting.status = "ready"
             meeting.error = None
             db.commit()
@@ -68,9 +70,7 @@ def process_meeting(factory, settings, meeting_id: str):
             meeting = db.get(Meeting, meeting_id)
             if meeting:
                 meeting.status = "failed"
-                meeting.error = (
-                    "Processing failed. Check provider configuration and connectivity, then retry."
-                )
+                meeting.error = provider_error(exc)
                 db.commit()
 
 

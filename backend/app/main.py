@@ -3,16 +3,17 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 
-from .ai import Provider
+from .ai import Provider, provider_error
 from .config import get_settings
 from .db import Base, Chunk, Meeting, Message, SessionLocal, engine, get_db
 from .intelligence import demo_answer, retrieve, source, validate_sources
-from .schemas import Question
+from .schemas import Question, Answer
+from pydantic import BaseModel, SecretStr, Field
 from .transcripts import parse_transcript
 from .worker import Worker
 
@@ -25,7 +26,7 @@ settings = get_settings()
 async def lifespan(app):
     if engine.dialect.name == "sqlite":
         Base.metadata.create_all(engine)
-    if settings.ai_mode == "openai":
+    if settings.ai_mode != "demo":
         Provider(settings)  # fail fast on missing key; never silently switch providers
     with SessionLocal() as db:
         # MVP runs one API process. Interrupted work is explicitly retryable.
@@ -47,7 +48,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Local-Settings"],
 )
 
 
@@ -73,7 +74,11 @@ def health(db: Session = Depends(get_db)):
     return {
         "status": "ok",
         "mode": settings.ai_mode,
-        "model": settings.llm_model if settings.ai_mode == "openai" else None,
+        "model": (
+            settings.anthropic_model if settings.ai_mode == "anthropic" else settings.llm_model
+        )
+        if settings.ai_mode != "demo"
+        else None,
     }
 
 
@@ -209,10 +214,20 @@ def chat(meeting_id: str, body: Question, db: Session = Depends(get_db)):
     )[::-1]
     history = [{"role": m.role, "content": m.content[:1600]} for m in recent]
     try:
-        provider = Provider(settings) if settings.ai_mode == "openai" else None
+        provider = Provider(settings) if settings.ai_mode != "demo" else None
         query = provider.rewrite(question, history) if provider else question
-        vector = provider.embed([query])[0] if provider else None
+        vector = provider.embed([query])[0] if settings.ai_mode == "openai" else None
         chunks = retrieve(db, meeting_id, query, vector)
+        if settings.ai_mode == "anthropic":
+            # Small meetings fit the context budget: retain the complete discussion so
+            # generic questions and later corrections are not lost to keyword matching.
+            all_chunks = list(
+                db.scalars(
+                    select(Chunk).where(Chunk.meeting_id == meeting_id).order_by(Chunk.ordinal)
+                )
+            )
+            if sum(len(c.text) for c in all_chunks) <= 14000:
+                chunks = all_chunks
         answer = (
             provider.answer(question, history, [source(c) for c in chunks])
             if provider
@@ -225,9 +240,7 @@ def chat(meeting_id: str, body: Question, db: Session = Depends(get_db)):
         citations = [source(c) for c in chunks if c.id in answer.source_ids]
     except Exception as exc:
         log.error("chat_failed meeting_id=%s error_type=%s", meeting_id, type(exc).__name__)
-        raise HTTPException(
-            502, "The AI service could not produce a validated answer. Please try again."
-        ) from exc
+        raise HTTPException(502, provider_error(exc)) from exc
     user_message = Message(meeting_id=meeting_id, role="user", content=question)
     assistant_message = Message(
         meeting_id=meeting_id, role="assistant", content=answer.text, citations=citations
@@ -243,3 +256,40 @@ def chat(meeting_id: str, body: Question, db: Session = Depends(get_db)):
         "citations": citations,
         "insufficient_evidence": answer.insufficient_evidence,
     }
+
+
+class AIConnection(BaseModel):
+    api_key: SecretStr = Field(exclude=True)
+
+
+@app.post("/api/settings/anthropic")
+def connect_anthropic(body: AIConnection, request: Request, db: Session = Depends(get_db)):
+    # Local-development endpoint only: never enable this unprotected endpoint on a hosted app.
+    if request.headers.get("X-Local-Settings") != "1":
+        raise HTTPException(403, "Use the local AI settings dialog.")
+    origin = request.headers.get("origin")
+    if origin and origin not in settings.cors_origins:
+        raise HTTPException(403, "Unknown origin.")
+    if db.scalar(select(Meeting.id).where(Meeting.status.in_(["queued", "processing"])).limit(1)):
+        raise HTTPException(
+            409, "Wait for meeting processing to finish before changing AI settings."
+        )
+    key = body.api_key.get_secret_value().strip()
+    if not key or len(key) > 500:
+        raise HTTPException(422, "Enter a valid Anthropic API key.")
+    candidate = settings.model_copy(
+        update={"ai_mode": "anthropic", "anthropic_api_key": SecretStr(key)}
+    )
+    try:
+        Provider(candidate).structured(
+            Answer,
+            "Connection check: return text='Connected', source_ids=[], insufficient_evidence=true.",
+            {"check": "connection"},
+        )
+    except Exception as exc:
+        log.warning("ai_connection_failed error_type=%s", type(exc).__name__)
+        raise HTTPException(502, provider_error(exc)) from exc
+    # Shared settings object is also used by the ingestion worker. Never persist or return the key.
+    settings.anthropic_api_key = SecretStr(key)
+    settings.ai_mode = "anthropic"
+    return {"mode": "anthropic", "model": settings.anthropic_model}

@@ -3,6 +3,7 @@
 import json
 import logging
 
+import httpx
 from openai import OpenAI
 
 from .config import Settings
@@ -20,6 +21,10 @@ Do not invent quotes or use outside knowledge. Keep answers concise."""
 class Provider:
     def __init__(self, settings: Settings):
         self.settings = settings
+        if settings.ai_mode == "anthropic":
+            if not settings.anthropic_api_key.get_secret_value():
+                raise ValueError("ANTHROPIC_API_KEY is required when AI_MODE=anthropic.")
+            return
         if not settings.openai_api_key.get_secret_value():
             raise ValueError("OPENAI_API_KEY is required when AI_MODE=openai.")
         self.client = OpenAI(
@@ -36,6 +41,40 @@ class Provider:
         return [row.embedding for row in sorted(result.data, key=lambda item: item.index)]
 
     def structured(self, schema, task: str, data: dict):
+        if self.settings.ai_mode == "anthropic":
+            with httpx.Client(timeout=60) as client:
+                response = client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": self.settings.anthropic_api_key.get_secret_value(),
+                        "anthropic-version": "2023-06-01",
+                    },
+                    json={
+                        "model": self.settings.anthropic_model,
+                        "max_tokens": 128 if data == {"check": "connection"} else 3000,
+                        "system": INSTRUCTIONS + "\n" + task,
+                        "messages": [
+                            {"role": "user", "content": json.dumps(data, ensure_ascii=False)}
+                        ],
+                        "output_config": {
+                            "format": {"type": "json_schema", "schema": schema.model_json_schema()}
+                        },
+                    },
+                )
+            response.raise_for_status()
+            body = response.json()
+            if body.get("stop_reason") != "end_turn":
+                raise ValueError("The model response was incomplete or refused.")
+            usage = body.get("usage", {})
+            log.info(
+                "generation_usage provider=anthropic input_tokens=%s output_tokens=%s",
+                usage.get("input_tokens"),
+                usage.get("output_tokens"),
+            )
+            text = "".join(
+                block["text"] for block in body.get("content", []) if block["type"] == "text"
+            )
+            return schema.model_validate_json(text)
         result = self.client.responses.parse(
             model=self.settings.llm_model,
             instructions=INSTRUCTIONS + "\n" + task,
@@ -77,3 +116,19 @@ class Provider:
             "Answer the question using evidence. Include all supporting source_ids. Set insufficient_evidence=true when the evidence cannot answer, and explain what is missing.",
             {"question": question, "history": history, "evidence": sources},
         )
+
+
+def provider_error(exc: Exception) -> str:
+    """Never forward provider bodies, prompts or credential values to the browser."""
+    status = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
+        exc, "status_code", None
+    )
+    if status in (401, 403):
+        return "The AI provider rejected this key or access. Use a valid API key from the provider console."
+    if status == 402:
+        return "The AI account needs billing credits before it can answer."
+    if status == 429:
+        return "The AI provider limit was reached. Check credits and rate limits, then try again."
+    if status == 404:
+        return "This AI model is unavailable to your account. Check the configured model."
+    return "The AI service could not produce a validated answer. Check connectivity and model access, then retry."

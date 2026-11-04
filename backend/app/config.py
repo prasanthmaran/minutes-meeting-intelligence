@@ -8,8 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
     database_url: str = "sqlite:///./meeting.db"
-    ai_mode: Literal["demo", "openai"] = "demo"
+    ai_mode: Literal["demo", "openai", "anthropic"] = "demo"
     openai_api_key: SecretStr = SecretStr("")
+    anthropic_api_key: SecretStr = SecretStr("")
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     llm_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]

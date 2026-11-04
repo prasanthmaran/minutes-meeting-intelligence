@@ -22,6 +22,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { AISettings } from "./components/AISettings";
 import { Button } from "./components/ui/button";
 import { api, clock } from "./api";
 import { sample } from "./sample";
@@ -40,6 +41,7 @@ export default function App() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState("");
+  const [aiSettings, setAISettings] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [search, setSearch] = useState("");
   const [question, setQuestion] = useState("");
@@ -353,14 +355,20 @@ export default function App() {
             Workspace <ChevronRight size={14} />
             <strong>Meetings</strong>
           </div>
-          <span className={`mode-pill ${mode === "demo" ? "demo" : ""}`}>
+          <button
+            onClick={() => setAISettings(true)}
+            aria-label="Configure AI"
+            className={`mode-pill ${mode === "demo" ? "demo" : ""}`}
+          >
             <span />
             {mode === "demo"
               ? "Demo · no API key"
-              : mode === "openai"
-                ? "AI connected"
-                : "Connecting…"}
-          </span>
+              : mode === "anthropic"
+                ? "Claude enabled"
+                : mode === "openai"
+                  ? "AI enabled"
+                  : "Connecting…"}
+          </button>
         </header>
         {error && (
           <div className="error-banner" role="alert">
@@ -536,6 +544,9 @@ export default function App() {
                           <p>
                             <strong>You’re exploring demo mode.</strong> Search real transcript
                             passages. AI summaries and synthesized answers need an API key.
+                            <button className="text-button" onClick={() => setAISettings(true)}>
+                              Connect Claude <ArrowRight size={14} />
+                            </button>
                           </p>
                         </div>
                       )}
@@ -763,6 +774,16 @@ export default function App() {
           </>
         )}
       </main>
+      {aiSettings && (
+        <AISettings
+          onClose={() => setAISettings(false)}
+          onConnected={() => {
+            setMode("anthropic");
+            setAISettings(false);
+            if (selected) reprocess();
+          }}
+        />
+      )}
       {modal && (
         <div className="modal-backdrop" onClick={() => !uploading && setModal(false)}>
           <section
@@ -844,8 +865,8 @@ export default function App() {
               </p>
             )}
             <div className="upload-disclosure">
-              {mode === "openai"
-                ? "AI mode sends transcript text to your configured OpenAI provider for processing."
+              {mode !== "demo" && mode
+                ? `AI mode sends transcript text to ${mode === "anthropic" ? "Anthropic" : "OpenAI"} for processing.`
                 : "Demo mode processes your transcript locally, without sending it to an AI provider."}
             </div>
             <Button

@@ -1460,9 +1460,49 @@ h1 {
 }
 /* Keep the desktop workspace panes independently scrollable. */
 @media (min-width: 901px) {
-  .main { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-  .topbar, .meeting-header, .error-banner { flex-shrink: 0; }
-  .workspace-grid { flex: 1; height: auto; min-height: 0; }
-  .welcome { overflow: auto; width: 100%; }
-  .notes-pane { min-height: 0; }
+  .main {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .topbar,
+  .meeting-header,
+  .error-banner {
+    flex-shrink: 0;
+  }
+  .workspace-grid {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+  }
+  .welcome {
+    overflow: auto;
+    width: 100%;
+  }
+  .notes-pane {
+    min-height: 0;
+  }
+}
+
+.ai-settings .key-label {
+  display: block;
+  text-align: left;
+  margin: 24px 0 8px;
+  font-size: 12px;
+  color: #53684b;
+}
+.ai-settings .key-input {
+  width: 100%;
+  border: 1px solid #c6d4bd;
+  background: white;
+  padding: 12px;
+  border-radius: 7px;
+  font-size: 14px;
+  color: #263a33;
+}
+.ai-settings .modal-error {
+  margin-bottom: 18px;
+  font-size: 12px;
+  line-height: 1.7;
 }

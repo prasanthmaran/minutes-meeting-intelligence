@@ -30,7 +30,13 @@ Open http://localhost:5173. Vite proxies `/api` to the backend. SQLite persists 
 
 ### Enable AI generation
 
-Set `AI_MODE=openai` and `OPENAI_API_KEY` in the project-root `.env`, then restart the backend. Upload a new transcript or select **Meeting options → Reprocess meeting**; reprocessing clears previous notes and chat history. The key stays on the backend. Transcript contents and questions are sent to OpenAI in this mode.
+**Claude / Anthropic:** Click the mode badge at the top-right or **Connect Claude**, enter your Anthropic API key in the password field, then click **Connect and enable AI**. A short provider request checks access before enabling AI. The selected meeting is reprocessed automatically. Wait for **ready**, then ask a question. Keys entered in this dialog live only in backend memory and are cleared when the backend restarts. Never paste a key into chat or commit it to Git.
+
+For persistent local configuration, set `AI_MODE=anthropic` and `ANTHROPIC_API_KEY` in the ignored project-root `.env` and restart the backend. `ANTHROPIC_MODEL` defaults to `claude-haiku-4-5-20251001`. Claude mode uses local BM25 retrieval with no embedding API. For meetings whose chunks fit within 14,000 characters, the full discussion is provided so generic questions and later corrections have context; longer meetings use the top matching chunks. This is lexical retrieval, not semantic embeddings. Meeting content is sent to Anthropic for notes and answers.
+
+The settings endpoint is for the loopback-bound, single-user prototype only. It requires a custom request header, checks browser Origin, and does not return or persist the key. It must be authenticated or removed before hosting this app.
+
+**OpenAI:** Set `AI_MODE=openai` and `OPENAI_API_KEY` in the project-root `.env`, then restart the backend. Upload a new transcript or select **Meeting options → Reprocess meeting**; reprocessing clears previous notes and chat history. The key stays on the backend. Transcript contents and questions are sent to OpenAI in this mode.
 
 Demo mode is the default and requires no key. It returns matching transcript excerpts, not generated summaries or conversational answers. Click **Explore a sample** to try it.
 
@@ -89,7 +95,7 @@ Uploads return `202` with a queued meeting. The worker claims queued rows, gener
 |---|---|
 | Chunking | Whole speaker turns, ~1,800 character target, one turn overlap. Preserves attribution and adjacent discussion; characters are a simple approximation, not token-accurate. Oversized turns remain intact within the 6,000-character limit. |
 | Embeddings | `text-embedding-3-small`, explicitly 1,536 dimensions. One hosted provider simplifies setup. Local embeddings would remove embedding API costs but add model download/runtime management. |
-| LLM | Configurable `gpt-4o-mini` default for structured extraction/answers. This is a starting configuration, not a claim that it wins a model benchmark. Evaluate on your transcripts before selecting a final model. |
+| LLM | Anthropic Claude Haiku 4.5 or configurable OpenAI `gpt-4o-mini` default for structured extraction/answers. This is a starting configuration, not a claim that it wins a model benchmark. Evaluate on your transcripts before selecting a final model. |
 | Vector storage | pgvector alongside relational data. Pinecone/Qdrant would add an operational dependency this corpus does not yet justify. SQLite performs Python cosine ranking for local development. |
 | Retrieval | BM25-style lexical scores plus semantic cosine ranking, combined by reciprocal rank fusion. Top five chunks, up to 14,000 evidence characters in AI mode. Lexical matching helps names and exact terms; vectors help paraphrases. |
 | Scope | Every retrieval query filters by meeting ID. Cross-meeting questions are not supported. No tenant isolation is claimed: the app has one shared workspace. |
@@ -100,7 +106,7 @@ Uploads return `202` with a queued meeting. The worker claims queued rows, gener
 
 Valid citation IDs do **not** prove that a claim follows from the evidence. Prompt injection and unsupported synthesis remain model risks. The prompt asks the model to distinguish proposals from decisions and avoid invented owners/deadlines; this needs live evaluation, not just schema tests. Demo retrieval can return loosely relevant passages and is not semantic reasoning.
 
-Provider documentation used: [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), [embeddings](https://developers.openai.com/api/docs/guides/embeddings).
+Provider documentation used: [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), [embeddings](https://developers.openai.com/api/docs/guides/embeddings).
 
 ## Tests and observability
 
