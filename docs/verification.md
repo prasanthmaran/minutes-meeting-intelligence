@@ -2,8 +2,8 @@
 
 ## Verified locally
 
-- 28 backend automated tests passed, including simulated AI orchestration and invalid-citation rejection.
-- 10 frontend tests passed; TypeScript and production build passed.
+- 35 backend automated tests passed, including simulated AI orchestration and invalid-citation rejection.
+- 13 frontend tests passed; TypeScript and production build passed.
 - SQLite migration upgrade → downgrade → upgrade.
 - Browser: sample upload, processing to ready, transcript viewer, persisted chat, clickable evidence, and unsupported-topic response in demo mode.
 - Frontend dependency audit: zero reported vulnerabilities after test-tooling upgrades.
@@ -47,3 +47,7 @@ Evidence: [recorded answers and citation checks](evaluations/claude-core-2026-11
 ## Meeting navigation update
 
 The home screen is now a searchable/filterable meeting list. Browser checks verified opening details, returning to the list, collapsing the sidebar with its divider handle, and finding Claude status in Settings. Larger type is applied to notes, transcript, and chat. Responsive checks at 1440px and 390px confirmed the library is usable; the 390px page had no document-level horizontal overflow. New frontend tests cover navigation, bookmarked routes, search/status filters, collapsed preference, and Settings-only AI status.
+
+## ElevenLabs voice integration
+
+Implemented voice connection settings, audio transcription, and speech synthesis of existing assistant answers. Automated tests use deterministic provider responses and cover request scoping, key rejection, input limits, and mocked audio output. Frontend tests cover connection discoverability, answer prerequisites, and denied microphone permission. No real microphone was activated by the agent, and live ElevenLabs calls remain unverified until the user connects a valid replacement key locally. The disclosed chat key was not used.

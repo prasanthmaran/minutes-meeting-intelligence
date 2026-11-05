@@ -20,6 +20,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { VoiceAssistant } from "./components/VoiceAssistant";
 import { Sidebar } from "./components/Sidebar";
 import { MeetingLibrary } from "./components/MeetingLibrary";
 import { AISettings } from "./components/AISettings";
@@ -46,6 +47,8 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState("");
   const [aiSettings, setAISettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"ai" | "voice">("ai");
+  const [voiceSettingsVersion, setVoiceSettingsVersion] = useState(0);
   const [tab, setTab] = useState<Tab>("overview");
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(() => {
@@ -324,7 +327,10 @@ export default function App() {
         onToggle={() => setCollapsed(c => !c)}
         onMeetings={() => openMeeting(null)}
         onUpload={() => setModal(true)}
-        onSettings={() => setAISettings(true)}
+        onSettings={() => {
+          setSettingsTab("ai");
+          setAISettings(true);
+        }}
         isLibrary={!selected}
       />
 
@@ -467,7 +473,13 @@ export default function App() {
                           <p>
                             <strong>You’re exploring demo mode.</strong> Search real transcript
                             passages. AI summaries and synthesized answers need an API key.
-                            <button className="text-button" onClick={() => setAISettings(true)}>
+                            <button
+                              className="text-button"
+                              onClick={() => {
+                                setSettingsTab("ai");
+                                setAISettings(true);
+                              }}
+                            >
                               Connect Claude <ArrowRight size={14} />
                             </button>
                           </p>
@@ -594,6 +606,20 @@ export default function App() {
                   </div>
                   <span className="scope-label">THIS MEETING</span>
                 </div>
+                <VoiceAssistant
+                  key={detail.id}
+                  meetingId={detail.id}
+                  ready={!!ready}
+                  aiEnabled={mode !== "demo" && !!mode}
+                  sending={sending}
+                  settingsVersion={voiceSettingsVersion}
+                  lastAnswer={[...messages].reverse().find(m => m.role === "assistant") ?? null}
+                  onQuestion={setQuestion}
+                  onSettings={() => {
+                    setSettingsTab("voice");
+                    setAISettings(true);
+                  }}
+                />
                 <div className="chat-messages" aria-live="polite">
                   {!messages.length && (
                     <div className="chat-intro">
@@ -699,6 +725,11 @@ export default function App() {
       </main>
       {aiSettings && (
         <AISettings
+          initialTab={settingsTab}
+          onVoiceConnected={() => {
+            setVoiceSettingsVersion(v => v + 1);
+            setAISettings(false);
+          }}
           mode={mode}
           onClose={() => setAISettings(false)}
           onConnected={() => {

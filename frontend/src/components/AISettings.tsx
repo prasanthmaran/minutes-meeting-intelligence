@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Loader2, X } from "lucide-react";
+import { KeyRound, Loader2, X, AudioLines } from "lucide-react";
 import { api } from "../api";
 import { Button } from "./ui/button";
 
@@ -7,30 +7,44 @@ export function AISettings({
   onClose,
   onConnected,
   mode = "demo",
+  initialTab = "ai",
+  onVoiceConnected,
 }: {
   mode?: string;
+  initialTab?: "ai" | "voice";
+  onVoiceConnected?: () => void;
   onClose: () => void;
   onConnected: () => void;
 }) {
+  const [tab, setTab] = useState(initialTab);
+  const [voiceConnected, setVoiceConnected] = useState(false);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     input.current?.focus();
+  }, [tab]);
+  useEffect(() => {
+    api<{ connected: boolean }>("/voice/status")
+      .then(s => setVoiceConnected(s.connected))
+      .catch(() => {});
   }, []);
   async function connect(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await api("/settings/anthropic", {
+      await api(tab === "voice" ? "/settings/elevenlabs" : "/settings/anthropic", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Local-Settings": "1" },
         body: JSON.stringify({ api_key: key }),
       });
       setKey("");
-      onConnected();
+      if (tab === "voice") {
+        setVoiceConnected(true);
+        onVoiceConnected?.();
+      } else onConnected();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -74,23 +88,51 @@ export function AISettings({
         >
           <X size={20} />
         </button>
+        <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+          {(["ai", "voice"] as const).map(t => (
+            <button
+              type="button"
+              key={t}
+              role="tab"
+              aria-selected={tab === t}
+              disabled={busy}
+              onClick={() => {
+                setTab(t);
+                setKey("");
+                setError("");
+              }}
+            >
+              {t === "ai" ? "AI connection" : "Voice · ElevenLabs"}
+            </button>
+          ))}
+        </div>
         <div className="intro-symbol">
-          <KeyRound size={25} />
+          {tab === "voice" ? <AudioLines size={25} /> : <KeyRound size={25} />}
         </div>
-        <h2 id="ai-title">AI settings</h2>
-        <div className={`settings-connection ${mode === "demo" ? "disconnected" : ""}`}>
+        <h2 id="ai-title">{tab === "voice" ? "Voice settings" : "AI settings"}</h2>
+        <div
+          className={`settings-connection ${(tab === "voice" ? !voiceConnected : mode === "demo") ? "disconnected" : ""}`}
+        >
           <span />
-          {mode === "anthropic"
-            ? "Claude enabled"
-            : mode === "openai"
-              ? "OpenAI enabled"
-              : mode === "demo"
-                ? "Demo · no API key"
-                : "Checking connection…"}
+          {tab === "voice"
+            ? voiceConnected
+              ? "ElevenLabs connected"
+              : "Voice not connected"
+            : mode === "anthropic"
+              ? "Claude enabled"
+              : mode === "openai"
+                ? "OpenAI enabled"
+                : mode === "demo"
+                  ? "Demo · no API key"
+                  : "Checking connection…"}
         </div>
-        <p>Get real answers, decisions, and action items from your meeting conversation.</p>
+        <p>
+          {tab === "voice"
+            ? "Ask questions with your microphone and listen to answers from your transcript."
+            : "Get real answers, decisions, and action items from your meeting conversation."}
+        </p>
         <label className="key-label" htmlFor="anthropic-key">
-          Anthropic API key
+          {tab === "voice" ? "ElevenLabs API key" : "Anthropic API key"}
         </label>
         <input
           ref={input}
@@ -102,18 +144,20 @@ export function AISettings({
           value={key}
           onChange={e => setKey(e.target.value)}
           placeholder={
-            mode === "anthropic"
-              ? "Enter a new key to change the connection"
-              : "Enter your Anthropic API key"
+            tab === "voice"
+              ? "Enter your ElevenLabs API key"
+              : mode === "anthropic"
+                ? "Enter a new key to change the connection"
+                : "Enter your Anthropic API key"
           }
           maxLength={500}
           disabled={busy}
           required
         />
         <p className="upload-disclosure">
-          Your key stays in backend memory for this session and is cleared when the backend
-          restarts. Connecting makes a short AI request. Meeting text and questions are sent to
-          Anthropic when you process or chat.
+          {tab === "voice"
+            ? "Your key stays in backend memory for this session. Voice questions are sent to ElevenLabs for transcription; answers are sent for speech generation. These use your ElevenLabs credits. Claude or OpenAI still provides the answers. The key needs voice-read, speech-to-text, and text-to-speech access."
+            : "Your key stays in backend memory for this session and is cleared when the backend restarts. Connecting makes a short AI request. Meeting text and questions are sent to Anthropic when you process or chat."}
         </p>
         {error && (
           <p className="modal-error" role="alert">
@@ -122,7 +166,11 @@ export function AISettings({
         )}
         <Button type="submit" disabled={busy || !key.trim()}>
           {busy ? <Loader2 size={16} className="spin" /> : <KeyRound size={16} />}
-          {busy ? "Checking connection…" : "Connect and enable AI"}
+          {busy
+            ? "Checking connection…"
+            : tab === "voice"
+              ? "Connect ElevenLabs"
+              : "Connect and enable AI"}
         </Button>
       </form>
     </div>

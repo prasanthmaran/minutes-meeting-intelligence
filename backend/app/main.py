@@ -16,6 +16,7 @@ from .schemas import Question, Answer
 from pydantic import BaseModel, SecretStr, Field
 from .transcripts import parse_transcript
 from .worker import Worker
+from .voice import router as voice_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Minutes — Meeting Intelligence", version="0.1.0", lifespan=lifespan)
+app.include_router(voice_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

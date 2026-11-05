@@ -2,7 +2,7 @@
 
 A focused meeting workspace: upload a timestamped transcript, inspect the conversation, and ask questions with clickable source evidence. Built for assignment Option 3.
 
-**Status:** Local MVP. Automatic meeting attendance, calendar integration, and voice transcription are not implemented. This is a single-user development app, with no authentication; do not expose it publicly as-is.
+**Status:** Local MVP. Automatic meeting attendance and calendar integration are not implemented. Voice questions and spoken answers are available through ElevenLabs. This is a single-user development app, with no authentication; do not expose it publicly as-is.
 
 ## Quick start
 
@@ -44,8 +44,23 @@ Demo mode is the default and requires no key. It returns matching transcript exc
 
 Docker is not needed for local development. The existing `compose.yaml` packages PostgreSQL/pgvector, the API, and frontend for later use. With a running Docker daemon, `docker compose up --build` serves the app at http://localhost:8080. This path has not been runtime-verified here.
 
+## Voice assistant (ElevenLabs)
+
+1. Open **Settings → Voice · ElevenLabs**, enter a valid replacement ElevenLabs key, and click **Connect ElevenLabs**. The key needs voice-read, speech-to-text, and text-to-speech access. The app verifies voice-read access; STT/TTS permissions and credits are checked when used.
+2. Connect Claude in **Settings → AI connection** if needed, then open a ready meeting.
+3. Expand **Voice assistant** above the meeting chat. Click **Ask by voice**, allow microphone access, speak, and click **Stop recording**. Recordings stop automatically at 60 seconds and are limited to 5 MB.
+4. Review the transcribed question in the composer, then press **Send**. The existing cited-answer flow handles the question and its follow-ups.
+5. Click **Speak latest answer**. ElevenLabs generates speech; playback starts when the browser permits it, with a Play control available otherwise.
+
+Pipeline: microphone → ElevenLabs Scribe → review question → Claude/OpenAI with meeting evidence → ElevenLabs speech. This is turn-based voice interaction, not a hosted ElevenAgents bot, live meeting participant, or full-duplex realtime session. The UI keeps the text answer and its citations visible.
+
+Audio recordings and generated audio are not persisted by this app. Audio questions and answer text are sent to ElevenLabs and use account credits; provider retention follows your ElevenLabs account policy. Keys entered through Settings remain only in backend memory until restart. Use ignored `.env` variables `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_STT_MODEL`, and `ELEVENLABS_TTS_MODEL` for local persistent configuration. Microphone recording requires localhost/HTTPS and a compatible browser. Multilingual availability depends on the configured STT/TTS model and voice; not every language has been tested.
+
+Provider references: [speech transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert), [speech generation](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).
+
 ## Features
 
+- Optional voice questions and spoken answers via ElevenLabs, with review-before-send.
 - UTF-8 `.txt` upload, with line-specific timestamp/format errors and bounded input size.
 - Meeting library, processing states, retry, and deletion of associated chunks and chat.
 - Speaker-labelled transcript viewer and source evidence panel.
@@ -145,7 +160,7 @@ Use `docs/candidate-reflection.md` to record which suggestions you accepted/reje
 
 ## With more time
 
-First: authenticated ownership, live quality evaluation, temporal decision reconciliation, and durable independent workers. Next: meeting-bot ingestion with verified webhooks and idempotency, calendar opt-in, audio transcription, cross-meeting decisions, and streaming chat. Automatic meeting attendance should feed the same ingestion contract rather than introduce a second intelligence pipeline.
+First: authenticated ownership, live quality evaluation, temporal decision reconciliation, and durable independent workers. Next: meeting-bot ingestion with verified webhooks and idempotency, calendar opt-in, meeting-recording transcription, cross-meeting decisions, and streaming chat. Automatic meeting attendance should feed the same ingestion contract rather than introduce a second intelligence pipeline.
 
 ## Submission materials
 

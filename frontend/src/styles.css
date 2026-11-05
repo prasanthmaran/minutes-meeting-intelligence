@@ -2119,3 +2119,94 @@ h1 {
     top: 20px;
   }
 }
+.settings-tabs {
+  display: flex;
+  gap: 5px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #edf2f9;
+  margin: 8px 0 25px;
+}
+.settings-tabs button {
+  flex: 1;
+  padding: 10px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #64748b;
+}
+.settings-tabs button[aria-selected="true"] {
+  background: #fff;
+  color: #2563eb;
+  box-shadow: 0 1px 3px #172d5010;
+  font-weight: 600;
+}
+.voice-assistant {
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fbff;
+  flex-shrink: 0;
+}
+.voice-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 14px 20px;
+  color: #426b9c;
+  text-align: left;
+}
+.voice-toggle strong {
+  font-size: 14px;
+  font-weight: 550;
+}
+.voice-toggle > span {
+  margin-left: auto;
+  font-size: 11px;
+  color: #8193ad;
+}
+.voice-panel {
+  padding: 0 20px 18px;
+  max-height: 320px;
+  overflow: auto;
+}
+.voice-panel p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+.voice-panel .voice-warning {
+  color: #936837;
+}
+.voice-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.voice-buttons .btn {
+  font-size: 12px;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+.voice-panel small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #8b9ab0;
+}
+.voice-panel .voice-notice {
+  color: #2563eb;
+  margin-top: 12px;
+}
+.voice-panel .voice-error {
+  color: #a34e3c;
+  margin-top: 12px;
+}
+.voice-panel .recording-indicator {
+  color: #b45353;
+}
+.voice-panel audio {
+  width: 100%;
+  height: 38px;
+  margin-top: 10px;
+}
