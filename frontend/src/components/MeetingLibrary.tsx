@@ -1,32 +1,102 @@
-import { useState } from "react";
-import { ArrowRight, FileText, Search, Upload } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Loader2,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { EmptyState } from "./EmptyState";
 import { clock } from "../api";
-import type { Meeting } from "../types";
+import type { Meeting, MeetingPage, MeetingQuery, MeetingSort } from "../types";
+
+const STATUS_LABELS = {
+  all: "All statuses",
+  ready: "Ready",
+  queued: "Queued",
+  processing: "Processing",
+  failed: "Failed",
+} as const;
+
+/** Page numbers to show: first, last, and a window around the current page. */
+function pageList(page: number, pages: number): (number | "gap")[] {
+  const wanted = new Set([1, pages, page - 1, page, page + 1].filter(p => p >= 1 && p <= pages));
+  const sorted = [...wanted].sort((a, b) => a - b);
+  return sorted.flatMap((p, i) => (i && p - sorted[i - 1] > 1 ? ["gap" as const, p] : [p]));
+}
 
 export function MeetingLibrary({
-  meetings,
+  page,
+  query,
+  onQueryChange,
   loading,
+  refreshing,
   onOpen,
   onUpload,
   onSample,
+  onDelete,
   uploading,
 }: {
-  meetings: Meeting[];
+  page: MeetingPage;
+  query: MeetingQuery;
+  onQueryChange: (change: Partial<MeetingQuery>) => void;
   loading: boolean;
+  refreshing: boolean;
   onOpen: (id: string) => void;
   onUpload: () => void;
   onSample: () => void;
+  onDelete: (meeting: Meeting) => void;
   uploading: boolean;
 }) {
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");
-  const filtered = meetings.filter(
-    m =>
-      (filter === "all" || m.status === filter) &&
-      [m.title, ...m.speakers].join(" ").toLowerCase().includes(search.trim().toLowerCase())
-  );
+  const [search, setSearch] = useState(query.q);
+  // Debounced server-side search: one request after typing pauses, back to page 1.
+  useEffect(() => {
+    if (search === query.q) return;
+    const timer = setTimeout(() => onQueryChange({ q: search, page: 1 }), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const meetings = page.items;
+  const hasAnyMeeting = page.counts.all > 0 || !!query.q || query.status !== "all";
+  const first = page.total ? (page.page - 1) * page.page_size + 1 : 0;
+  const last = Math.min(page.page * page.page_size, page.total);
+
+  function sortHeader(label: string, key: MeetingSort): ReactNode {
+    const active = query.sort === key;
+    const nextOrder = active
+      ? query.order === "asc"
+        ? "desc"
+        : "asc"
+      : key === "title"
+        ? "asc"
+        : "desc";
+    return (
+      <th aria-sort={active ? (query.order === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          className={`sort-button ${active ? "active" : ""}`}
+          onClick={() => onQueryChange({ sort: key, order: nextOrder, page: 1 })}
+          title={`Sort by ${label.toLowerCase()}`}
+        >
+          {label}
+          {active ? (
+            query.order === "asc" ? (
+              <ArrowUp size={13} />
+            ) : (
+              <ArrowDown size={13} />
+            )
+          ) : (
+            <ArrowUpDown size={13} className="sort-idle" />
+          )}
+        </button>
+      </th>
+    );
+  }
   return (
     <section className="meeting-library" aria-labelledby="library-title">
       <div className="library-heading">
@@ -40,13 +110,14 @@ export function MeetingLibrary({
           Upload transcript
         </Button>
       </div>
-      <div className="library-toolbar">
+      <div className="library-toolbar" data-tour="library">
         <label className="library-search">
           <Search size={18} />
           <input
             aria-label="Search meetings"
             value={search}
             onChange={e => setSearch(e.target.value)}
+            maxLength={200}
             placeholder="Search meetings or participants…"
           />
         </label>
@@ -54,25 +125,30 @@ export function MeetingLibrary({
           <span className="sr-only">Filter meetings by status</span>
           <select
             aria-label="Filter meetings by status"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
+            value={query.status}
+            onChange={e =>
+              onQueryChange({ status: e.target.value as MeetingQuery["status"], page: 1 })
+            }
           >
-            <option value="all">All statuses</option>
-            <option value="ready">Ready</option>
-            <option value="queued">Queued</option>
-            <option value="processing">Processing</option>
-            <option value="failed">Failed</option>
+            {(Object.keys(STATUS_LABELS) as (keyof typeof STATUS_LABELS)[]).map(key => (
+              <option key={key} value={key}>
+                {STATUS_LABELS[key]} ({page.counts[key] ?? 0})
+              </option>
+            ))}
           </select>
         </label>
-        <span className="library-count">
-          {filtered.length} {filtered.length === 1 ? "meeting" : "meetings"}
+        <span className="library-count" aria-live="polite">
+          {refreshing && <Loader2 size={14} className="spin" aria-hidden="true" />}
+          {page.total
+            ? `${first}–${last} of ${page.total} ${page.total === 1 ? "meeting" : "meetings"}`
+            : "0 meetings"}
         </span>
       </div>
       {loading ? (
         <div className="library-empty" role="status">
           Loading meetings…
         </div>
-      ) : meetings.length === 0 ? (
+      ) : !hasAnyMeeting ? (
         <EmptyState
           art="library"
           title="No meetings yet"
@@ -92,24 +168,24 @@ export function MeetingLibrary({
         </EmptyState>
       ) : (
         <div className="meeting-table-wrap">
-          <table className="meeting-table">
+          <table className={`meeting-table ${refreshing ? "is-refreshing" : ""}`}>
             <caption className="sr-only">
               Uploaded meetings. Select a meeting to open its details.
             </caption>
             <thead>
               <tr>
-                <th>Meeting</th>
-                <th>Uploaded</th>
+                {sortHeader("Meeting", "title")}
+                {sortHeader("Uploaded", "created_at")}
                 <th>Participants</th>
-                <th>Transcript</th>
-                <th>Status</th>
+                {sortHeader("Transcript", "duration")}
+                {sortHeader("Status", "status")}
                 <th>
                   <span className="sr-only">Open</span>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(m => (
+              {meetings.map((m: Meeting) => (
                 <tr key={m.id}>
                   <td>
                     <button className="meeting-title-button" onClick={() => onOpen(m.id)}>
@@ -147,7 +223,20 @@ export function MeetingLibrary({
                   <td>
                     <span className={`meeting-status status-${m.status}`}>{m.status}</span>
                   </td>
-                  <td>
+                  <td className="meeting-row-actions">
+                    <button
+                      className="meeting-delete-button"
+                      aria-label={`Delete ${m.title}`}
+                      title={
+                        ["queued", "processing"].includes(m.status)
+                          ? "Wait for processing to finish before deleting"
+                          : `Delete ${m.title}`
+                      }
+                      disabled={["queued", "processing"].includes(m.status)}
+                      onClick={() => onDelete(m)}
+                    >
+                      <Trash2 size={17} />
+                    </button>
                     <button
                       className="meeting-open-button"
                       aria-label={`Open ${m.title}`}
@@ -161,12 +250,63 @@ export function MeetingLibrary({
               ))}
             </tbody>
           </table>
-          {!filtered.length && (
+          {!meetings.length && (
             <p className="library-no-results">No meetings match your search or status filter.</p>
+          )}
+          {page.total > 0 && (
+            <nav className="pagination" aria-label="Meeting pages">
+              <label className="page-size">
+                <span>Rows</span>
+                <select
+                  aria-label="Meetings per page"
+                  value={query.page_size}
+                  onChange={e => onQueryChange({ page_size: Number(e.target.value), page: 1 })}
+                >
+                  {[10, 20, 50].map(size => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="page-buttons">
+                <button
+                  aria-label="Previous page"
+                  disabled={page.page <= 1}
+                  onClick={() => onQueryChange({ page: page.page - 1 })}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                {pageList(page.page, page.pages).map((p, i) =>
+                  p === "gap" ? (
+                    <span key={`gap-${i}`} className="page-gap">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      aria-label={`Page ${p}`}
+                      aria-current={p === page.page ? "page" : undefined}
+                      className={p === page.page ? "current" : ""}
+                      onClick={() => onQueryChange({ page: p })}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  aria-label="Next page"
+                  disabled={page.page >= page.pages}
+                  onClick={() => onQueryChange({ page: page.page + 1 })}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </nav>
           )}
         </div>
       )}
-      {meetings.length > 0 && (
+      {page.total > 0 && (
         <p className="library-help">
           Participant counts reflect speaker labels in the transcript. Open a meeting to review the
           original conversation.

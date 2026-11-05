@@ -6,16 +6,27 @@ import uuid
 from urllib.parse import quote
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile, Request
+from typing import Literal
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import Text, cast, delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from .ai import Provider, provider_error
 from .config import get_settings
-from .db import Chunk, Meeting, Message, SessionLocal, engine, get_db, upgrade_sqlite
+from .db import (
+    Chunk,
+    Meeting,
+    Message,
+    SessionLocal,
+    engine,
+    get_db,
+    turn_summary,
+    upgrade_sqlite,
+)
 from .intelligence import demo_answer, retrieve, source, validate_sources
 from .schemas import Question, Answer
 from pydantic import BaseModel, SecretStr, Field
@@ -104,6 +115,9 @@ def get_meeting(db, meeting_id):
 
 
 def summary(meeting):
+    if meeting.turn_count is None:  # rows written before the summary columns existed
+        for key, value in turn_summary(meeting.turns).items():
+            setattr(meeting, key, value)
     return {
         "id": meeting.id,
         "title": meeting.title,
@@ -111,17 +125,76 @@ def summary(meeting):
         "status": meeting.status,
         "mode": meeting.mode,
         "error": meeting.error,
-        "speakers": list(dict.fromkeys(t["speaker"] for t in meeting.turns)),
-        "duration": meeting.turns[-1]["seconds"],
-        "turn_count": len(meeting.turns),
+        "speakers": meeting.speakers or [],
+        "duration": meeting.duration or 0,
+        "turn_count": meeting.turn_count or 0,
         "progress": meeting.progress,
         "source_name": meeting.source_name,
     }
 
 
+STATUSES = ("queued", "processing", "ready", "failed")
+SORTS = {
+    "created_at": Meeting.created_at,
+    "title": func.lower(Meeting.title),
+    "duration": Meeting.duration,
+    "turns": Meeting.turn_count,
+    "status": Meeting.status,
+}
+
+
 @app.get("/api/meetings")
-def meetings(db: Session = Depends(get_db)):
-    return [summary(m) for m in db.scalars(select(Meeting).order_by(Meeting.created_at.desc()))]
+def meetings(
+    q: str = Query("", max_length=200),
+    status: Literal["all", "queued", "processing", "ready", "failed"] = "all",
+    sort: Literal["created_at", "title", "duration", "turns", "status"] = "created_at",
+    order: Literal["asc", "desc"] = "desc",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Server-side search (title or participant), status filter, sorting and pagination."""
+    matches = []
+    term = q.strip().lower()
+    if term:
+        pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        matches.append(
+            or_(
+                func.lower(Meeting.title).like(pattern, escape="\\"),
+                func.lower(cast(Meeting.speakers, Text)).like(pattern, escape="\\"),
+            )
+        )
+    # Per-status counts for the filter honour the search but not the status itself.
+    counts = dict.fromkeys(STATUSES, 0)
+    for value, count in db.execute(
+        select(Meeting.status, func.count()).where(*matches).group_by(Meeting.status)
+    ):
+        counts[value] = count
+    if status != "all":
+        matches.append(Meeting.status == status)
+    total = db.scalar(select(func.count()).select_from(Meeting).where(*matches)) or 0
+    pages = max(1, -(-total // page_size))
+    page = min(page, pages)
+    column = SORTS[sort]
+    rows = db.scalars(
+        select(Meeting)
+        .where(*matches)
+        .order_by(
+            column.asc() if order == "asc" else column.desc(),
+            Meeting.created_at.desc(),
+            Meeting.id,
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return {
+        "items": [summary(m) for m in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages,
+        "counts": {"all": sum(counts.values()), **counts},
+    }
 
 
 @app.post("/api/meetings", status_code=202)
@@ -155,6 +228,7 @@ def upload(file: UploadFile, db: Session = Depends(get_db)):
     meeting = Meeting(
         title=title,
         turns=turns,
+        **turn_summary(turns),
         status="queued",
         mode=settings.ai_mode,
         source_text=transcript,

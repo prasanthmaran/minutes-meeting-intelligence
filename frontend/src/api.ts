@@ -28,3 +28,22 @@ export function clock(seconds: number): string {
   const s = (seconds % 60).toString().padStart(2, "0");
   return h ? `${h.toString().padStart(2, "0")}:${m}:${s}` : `${m}:${s}`;
 }
+
+export function meetingListPath(query: {
+  q: string;
+  status: string;
+  sort: string;
+  order: string;
+  page: number;
+  page_size: number;
+}): string {
+  const params = new URLSearchParams({
+    status: query.status,
+    sort: query.sort,
+    order: query.order,
+    page: String(query.page),
+    page_size: String(query.page_size),
+  });
+  if (query.q.trim()) params.set("q", query.q.trim());
+  return `/meetings?${params}`;
+}
