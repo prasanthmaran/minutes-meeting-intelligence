@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, ForeignKey, String, Text, create_engine, event
+from sqlalchemy import JSON, ForeignKey, String, Text, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import get_settings
@@ -31,6 +31,11 @@ class Meeting(Base):
     error: Mapped[str | None] = mapped_column(Text)
     turns: Mapped[list] = mapped_column(JSON)
     notes: Mapped[dict | None] = mapped_column(JSON)
+    # Live processing steps, streamed to the browser while status is queued/processing.
+    progress: Mapped[dict | None] = mapped_column(JSON)
+    # The uploaded file exactly as received (deferred: only loaded when requested).
+    source_text: Mapped[str | None] = mapped_column(Text, deferred=True)
+    source_name: Mapped[str | None] = mapped_column(String(255))
     chunks: Mapped[list["Chunk"]] = relationship(cascade="all, delete-orphan")
     messages: Mapped[list["Message"]] = relationship(cascade="all, delete-orphan")
 
@@ -113,3 +118,14 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 def get_db():
     with SessionLocal() as session:
         yield session
+
+
+def upgrade_sqlite(target) -> None:
+    """Create tables and add columns introduced after a dev SQLite file was created."""
+    Base.metadata.create_all(target)
+    columns = {c["name"] for c in inspect(target).get_columns("meetings")}
+    added = {"progress": "JSON", "source_text": "TEXT", "source_name": "VARCHAR(255)"}
+    with target.begin() as connection:
+        for name, kind in added.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE meetings ADD COLUMN {name} {kind}"))

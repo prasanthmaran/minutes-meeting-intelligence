@@ -9,13 +9,13 @@ from alembic.config import Config
 
 from alembic import command
 
-from .db import Base, engine
+from .db import engine, upgrade_sqlite
 
 
 def migrate() -> str:
     if engine.dialect.name == "sqlite":
         # Development SQLite files are created from the models (as on API startup).
-        Base.metadata.create_all(engine)
+        upgrade_sqlite(engine)
         return "sqlite: tables ready"
     root = Path(__file__).resolve().parent.parent
     config = Config(str(root / "alembic.ini"))

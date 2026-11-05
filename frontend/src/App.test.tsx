@@ -195,7 +195,8 @@ it("replaces an endless spinner with a recoverable state for a deleted meeting l
   ).toBeInTheDocument();
   expect(screen.queryByText(/Loading meeting/)).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /Back to meetings/ }));
+  // The empty state and the breadcrumb both lead back; use the empty-state action.
+  fireEvent.click(screen.getAllByRole("button", { name: /Back to meetings/ }).at(-1)!);
   expect(await screen.findByRole("heading", { name: "No meetings yet" })).toBeInTheDocument();
 });
 
@@ -235,4 +236,152 @@ it("imports several transcripts and reports the ones that fail", async () => {
     "Imported 2 of 3 transcripts. bad.txt: Line 1"
   );
   expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(3);
+});
+
+it("streams processing progress and loads the finished meeting", async () => {
+  const sources: FakeEventSource[] = [];
+  class FakeEventSource {
+    listeners: Record<string, (e: MessageEvent) => void> = {};
+    onerror: (() => void) | null = null;
+    closed = false;
+    constructor(public url: string) {
+      sources.push(this);
+    }
+    addEventListener(type: string, fn: (e: MessageEvent) => void) {
+      this.listeners[type] = fn;
+    }
+    close() {
+      this.closed = true;
+    }
+    emit(type: string, data: unknown) {
+      this.listeners[type]?.({ data: JSON.stringify(data) } as MessageEvent);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeEventSource);
+  const meeting = {
+    id: "m1",
+    title: "Launch",
+    created_at: "2026-11-06",
+    status: "processing",
+    mode: "anthropic",
+    error: null,
+    speakers: ["Maya"],
+    duration: 5,
+    turn_count: 1,
+    turns: [{ id: 0, seconds: 0, speaker: "Maya", text: "Hi" }],
+    sources: [],
+    notes: null,
+    progress: null,
+  };
+  let ready = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        url.endsWith("/health")
+          ? { mode: "anthropic" }
+          : url.endsWith("/meetings")
+            ? [{ ...meeting, status: ready ? "ready" : "processing" }]
+            : url.endsWith("/messages")
+              ? []
+              : ready
+                ? {
+                    ...meeting,
+                    status: "ready",
+                    notes: { summary: [], decisions: [], actions: [], questions: [] },
+                  }
+                : meeting,
+    }))
+  );
+  window.location.hash = "#/meetings/m1";
+  render(<App />);
+  await waitFor(() => expect(sources).toHaveLength(1));
+  expect(sources[0].url).toBe("/api/meetings/m1/events");
+  sources[0].emit("progress", {
+    status: "processing",
+    error: null,
+    progress: {
+      percent: 40,
+      detail: "Marked turns 1–40 of 80",
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      steps: [
+        {
+          key: "marks",
+          label: "Marking questions and emotions",
+          state: "active",
+          done: 1,
+          total: 2,
+        },
+      ],
+    },
+  });
+  expect(await screen.findByText("Marked turns 1–40 of 80")).toBeInTheDocument();
+  expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "40");
+  ready = true;
+  sources[0].emit("done", { status: "ready", error: null, progress: null });
+  await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+  expect(sources[0].closed).toBe(true);
+});
+
+it("falls back to polling when the event stream is buffered", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const closed: boolean[] = [];
+  class SilentEventSource {
+    onerror: (() => void) | null = null;
+    constructor(public url: string) {
+      closed.push(false);
+    }
+    addEventListener() {}
+    close() {
+      closed[0] = true;
+    }
+  }
+  vi.stubGlobal("EventSource", SilentEventSource);
+  const processing = {
+    id: "m2",
+    title: "Buffered",
+    created_at: "2026-11-06",
+    status: "processing",
+    mode: "anthropic",
+    error: null,
+    speakers: ["Maya"],
+    duration: 5,
+    turn_count: 1,
+    turns: [{ id: 0, seconds: 0, speaker: "Maya", text: "Hi" }],
+    sources: [],
+    notes: null,
+    progress: {
+      percent: 62,
+      detail: "Summarizing 4 speakers",
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      steps: [],
+    },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        url.endsWith("/health")
+          ? { mode: "anthropic" }
+          : url.endsWith("/meetings")
+            ? [processing]
+            : url.endsWith("/messages")
+              ? []
+              : processing,
+    }))
+  );
+  window.location.hash = "#/meetings/m2";
+  render(<App />);
+  expect(await screen.findByText("Live updates")).toBeInTheDocument();
+  await vi.advanceTimersByTimeAsync(3100);
+  expect(closed[0]).toBe(true);
+  expect(await screen.findByText("Checking for updates")).toBeInTheDocument();
+  expect(screen.getByText("Summarizing 4 speakers")).toBeInTheDocument();
+  vi.useRealTimers();
 });

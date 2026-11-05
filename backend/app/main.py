@@ -1,16 +1,21 @@
+import asyncio
+import json
 import logging
 import time
 import uuid
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 
 from .ai import Provider, provider_error
 from .config import get_settings
-from .db import Base, Chunk, Meeting, Message, SessionLocal, engine, get_db
+from .db import Chunk, Meeting, Message, SessionLocal, engine, get_db, upgrade_sqlite
 from .intelligence import demo_answer, retrieve, source, validate_sources
 from .schemas import Question, Answer
 from pydantic import BaseModel, SecretStr, Field
@@ -24,12 +29,13 @@ from .live_voice import router as live_voice_router
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
 settings = get_settings()
+TRANSCRIPT_TYPES = {"txt", "vtt", "srt"}
 
 
 @asynccontextmanager
 async def lifespan(app):
     if engine.dialect.name == "sqlite":
-        Base.metadata.create_all(engine)
+        upgrade_sqlite(engine)
     # Keys saved from Settings survive restarts (encrypted in the database).
     stored_settings.load(settings, SessionLocal)
     if settings.ai_mode != "demo":
@@ -108,6 +114,8 @@ def summary(meeting):
         "speakers": list(dict.fromkeys(t["speaker"] for t in meeting.turns)),
         "duration": meeting.turns[-1]["seconds"],
         "turn_count": len(meeting.turns),
+        "progress": meeting.progress,
+        "source_name": meeting.source_name,
     }
 
 
@@ -118,8 +126,9 @@ def meetings(db: Session = Depends(get_db)):
 
 @app.post("/api/meetings", status_code=202)
 def upload(file: UploadFile, db: Session = Depends(get_db)):
-    if not file.filename or not file.filename.lower().endswith(".txt"):
-        raise HTTPException(415, "Upload a UTF-8 .txt transcript.")
+    extension = (file.filename or "").lower().rsplit(".", 1)[-1]
+    if not file.filename or "." not in file.filename or extension not in TRANSCRIPT_TYPES:
+        raise HTTPException(415, "Upload a UTF-8 transcript file (.txt, .vtt or .srt).")
     data = file.file.read(settings.max_upload_bytes + 1)
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, "Transcript exceeds the 250 KB limit.")
@@ -136,13 +145,21 @@ def upload(file: UploadFile, db: Session = Depends(get_db)):
         ) from exc
     title = (
         file.filename.replace("\\", "/")
-        .rsplit("/", 1)[-1][:-4]
+        .rsplit("/", 1)[-1]
+        .rsplit(".", 1)[0]
         .replace("_", " ")
         .replace("-", " ")
         .strip()[:160]
         or "Untitled meeting"
     )
-    meeting = Meeting(title=title, turns=turns, status="queued", mode=settings.ai_mode)
+    meeting = Meeting(
+        title=title,
+        turns=turns,
+        status="queued",
+        mode=settings.ai_mode,
+        source_text=transcript,
+        source_name=file.filename.replace("\\", "/").rsplit("/", 1)[-1][:255],
+    )
     db.add(meeting)
     db.commit()
     return summary(meeting)
@@ -164,6 +181,77 @@ def detail(meeting_id: str, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/meetings/{meeting_id}/events")
+async def meeting_events(meeting_id: str, request: Request):
+    """Server-Sent Events: processing progress until the meeting is ready or failed.
+
+    Progress is read from the database because the worker may run in another process.
+    Events: `progress` on every change, `done` once finished; comments keep proxies open.
+    """
+    open_db = request.app.dependency_overrides.get(get_db, get_db)
+
+    def snapshot():
+        sessions = open_db()
+        db = next(sessions)
+        try:
+            meeting = db.get(Meeting, meeting_id)
+            if not meeting:
+                return None
+            return {"status": meeting.status, "error": meeting.error, "progress": meeting.progress}
+        finally:
+            sessions.close()
+
+    if await run_in_threadpool(snapshot) is None:
+        raise HTTPException(404, "Meeting not found.")
+
+    async def stream():
+        last, quiet = None, 0.0
+        deadline = time.monotonic() + 15 * 60
+        yield "retry: 2000\n\n"
+        while time.monotonic() < deadline and not await request.is_disconnected():
+            state = await run_in_threadpool(snapshot)
+            if state is None:
+                yield 'event: done\ndata: {"status": "deleted"}\n\n'
+                return
+            data = json.dumps(state, separators=(",", ":"))
+            if data != last:
+                last, quiet = data, 0.0
+                yield f"event: progress\ndata: {data}\n\n"
+            elif quiet >= 15:
+                quiet = 0.0
+                yield ": keep-alive\n\n"
+            if state["status"] in ("ready", "failed"):
+                yield f"event: done\ndata: {data}\n\n"
+                return
+            await asyncio.sleep(0.5)
+            quiet += 0.5
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/source")
+def meeting_source(meeting_id: str, download: bool = False, db: Session = Depends(get_db)):
+    """The uploaded transcript exactly as received (UTF-8 text)."""
+    meeting = get_meeting(db, meeting_id)
+    if meeting.source_text is None:
+        raise HTTPException(404, "The original file was not stored for this meeting.")
+    name = meeting.source_name or f"{meeting.title}.txt"
+    safe = (
+        "".join(ch if ch.isalnum() or ch in "._- " else "_" for ch in name).strip()
+        or "transcript.txt"
+    )
+    headers = {"Cache-Control": "no-store"}
+    if download:
+        headers["Content-Disposition"] = (
+            f"attachment; filename=\"{safe}\"; filename*=UTF-8''{quote(name)}"
+        )
+    return PlainTextResponse(meeting.source_text, headers=headers)
+
+
 @app.post("/api/meetings/{meeting_id}/retry", status_code=202)
 def retry(meeting_id: str, db: Session = Depends(get_db)):
     meeting = get_meeting(db, meeting_id)
@@ -172,6 +260,7 @@ def retry(meeting_id: str, db: Session = Depends(get_db)):
     db.execute(delete(Chunk).where(Chunk.meeting_id == meeting_id))
     db.execute(delete(Message).where(Message.meeting_id == meeting_id))
     meeting.notes, meeting.error, meeting.status = None, None, "queued"
+    meeting.progress = None
     db.commit()
     return summary(meeting)
 

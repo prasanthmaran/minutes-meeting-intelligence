@@ -1,5 +1,5 @@
 import math
-import re
+import unicodedata
 from collections import Counter
 
 from pgvector.sqlalchemy import Vector
@@ -13,8 +13,24 @@ STOP = set(
 )
 
 
+def _word_char(ch: str) -> bool:
+    # Letters, digits and combining marks: keeps Tamil/Devanagari vowel signs and
+    # accented Latin letters inside the word instead of splitting at them.
+    return ch.isalnum() or unicodedata.category(ch).startswith("M")
+
+
 def tokens(text: str) -> list[str]:
-    return [word for word in re.findall(r"[a-z0-9]+", text.lower()) if word not in STOP]
+    """Language-neutral word tokens for BM25 (any script, case-folded, NFC)."""
+    words, current = [], []
+    for ch in unicodedata.normalize("NFC", text).casefold():
+        if _word_char(ch):
+            current.append(ch)
+        elif current:
+            words.append("".join(current))
+            current = []
+    if current:
+        words.append("".join(current))
+    return [word for word in words if word not in STOP]
 
 
 def lexical_rank(chunks: list[Chunk], query: str) -> list[tuple[Chunk, float]]:

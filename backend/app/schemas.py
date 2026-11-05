@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -34,3 +36,39 @@ class Question(BaseModel):
 
 class QueryRewrite(StrictModel):
     query: str
+
+
+# Transcript analysis: per-turn markers and per-speaker summaries (AI modes only).
+MarkKind = Literal["question", "decision", "action", "risk", "proposal"]
+Emotion = Literal[
+    "neutral",
+    "positive",
+    "excited",
+    "agreement",
+    "concerned",
+    "frustrated",
+    "anxious",
+    "confused",
+    "surprised",
+]
+
+
+class TurnMark(StrictModel):
+    turn_id: int
+    kinds: list[MarkKind]
+    emotion: Emotion
+    emotion_note: str | None
+
+
+class TurnMarks(StrictModel):
+    turns: list[TurnMark]
+
+
+class SpeakerSummary(StrictModel):
+    speaker: str
+    summary: str
+    key_points: list[str]
+
+
+class SpeakerSummaries(StrictModel):
+    speakers: list[SpeakerSummary]
