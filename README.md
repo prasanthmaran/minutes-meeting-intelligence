@@ -163,3 +163,5 @@ These show the real application in demo mode.
 ![Meeting workspace](docs/screenshots/workspace.jpg)
 
 ![Welcome screen](docs/screenshots/welcome.jpg)
+
+Submission readiness and remaining work: [submission checklist](docs/submission-checklist.md).
