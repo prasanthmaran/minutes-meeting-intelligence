@@ -1,32 +1,43 @@
+import asyncio
+import json
 import logging
 import time
 import uuid
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 
 from .ai import Provider, provider_error
 from .config import get_settings
-from .db import Base, Chunk, Meeting, Message, SessionLocal, engine, get_db
+from .db import Chunk, Meeting, Message, SessionLocal, engine, get_db, upgrade_sqlite
 from .intelligence import demo_answer, retrieve, source, validate_sources
 from .schemas import Question, Answer
 from pydantic import BaseModel, SecretStr, Field
 from .transcripts import parse_transcript
 from .worker import Worker
-from .voice import router as voice_router
+from .hosting import configure_hosting
+from . import stored_settings
+from .voice import local_request, router as voice_router
+from .live_voice import router as live_voice_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
 settings = get_settings()
+TRANSCRIPT_TYPES = {"txt", "vtt", "srt"}
 
 
 @asynccontextmanager
 async def lifespan(app):
     if engine.dialect.name == "sqlite":
-        Base.metadata.create_all(engine)
+        upgrade_sqlite(engine)
+    # Keys saved from Settings survive restarts (encrypted in the database).
+    stored_settings.load(settings, SessionLocal)
     if settings.ai_mode != "demo":
         Provider(settings)  # fail fast on missing key; never silently switch providers
     with SessionLocal() as db:
@@ -46,6 +57,7 @@ async def lifespan(app):
 
 app = FastAPI(title="Minutes — Meeting Intelligence", version="0.1.0", lifespan=lifespan)
 app.include_router(voice_router)
+app.include_router(live_voice_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -102,6 +114,8 @@ def summary(meeting):
         "speakers": list(dict.fromkeys(t["speaker"] for t in meeting.turns)),
         "duration": meeting.turns[-1]["seconds"],
         "turn_count": len(meeting.turns),
+        "progress": meeting.progress,
+        "source_name": meeting.source_name,
     }
 
 
@@ -112,8 +126,9 @@ def meetings(db: Session = Depends(get_db)):
 
 @app.post("/api/meetings", status_code=202)
 def upload(file: UploadFile, db: Session = Depends(get_db)):
-    if not file.filename or not file.filename.lower().endswith(".txt"):
-        raise HTTPException(415, "Upload a UTF-8 .txt transcript.")
+    extension = (file.filename or "").lower().rsplit(".", 1)[-1]
+    if not file.filename or "." not in file.filename or extension not in TRANSCRIPT_TYPES:
+        raise HTTPException(415, "Upload a UTF-8 transcript file (.txt, .vtt or .srt).")
     data = file.file.read(settings.max_upload_bytes + 1)
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, "Transcript exceeds the 250 KB limit.")
@@ -130,13 +145,21 @@ def upload(file: UploadFile, db: Session = Depends(get_db)):
         ) from exc
     title = (
         file.filename.replace("\\", "/")
-        .rsplit("/", 1)[-1][:-4]
+        .rsplit("/", 1)[-1]
+        .rsplit(".", 1)[0]
         .replace("_", " ")
         .replace("-", " ")
         .strip()[:160]
         or "Untitled meeting"
     )
-    meeting = Meeting(title=title, turns=turns, status="queued", mode=settings.ai_mode)
+    meeting = Meeting(
+        title=title,
+        turns=turns,
+        status="queued",
+        mode=settings.ai_mode,
+        source_text=transcript,
+        source_name=file.filename.replace("\\", "/").rsplit("/", 1)[-1][:255],
+    )
     db.add(meeting)
     db.commit()
     return summary(meeting)
@@ -158,6 +181,77 @@ def detail(meeting_id: str, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/meetings/{meeting_id}/events")
+async def meeting_events(meeting_id: str, request: Request):
+    """Server-Sent Events: processing progress until the meeting is ready or failed.
+
+    Progress is read from the database because the worker may run in another process.
+    Events: `progress` on every change, `done` once finished; comments keep proxies open.
+    """
+    open_db = request.app.dependency_overrides.get(get_db, get_db)
+
+    def snapshot():
+        sessions = open_db()
+        db = next(sessions)
+        try:
+            meeting = db.get(Meeting, meeting_id)
+            if not meeting:
+                return None
+            return {"status": meeting.status, "error": meeting.error, "progress": meeting.progress}
+        finally:
+            sessions.close()
+
+    if await run_in_threadpool(snapshot) is None:
+        raise HTTPException(404, "Meeting not found.")
+
+    async def stream():
+        last, quiet = None, 0.0
+        deadline = time.monotonic() + 15 * 60
+        yield "retry: 2000\n\n"
+        while time.monotonic() < deadline and not await request.is_disconnected():
+            state = await run_in_threadpool(snapshot)
+            if state is None:
+                yield 'event: done\ndata: {"status": "deleted"}\n\n'
+                return
+            data = json.dumps(state, separators=(",", ":"))
+            if data != last:
+                last, quiet = data, 0.0
+                yield f"event: progress\ndata: {data}\n\n"
+            elif quiet >= 15:
+                quiet = 0.0
+                yield ": keep-alive\n\n"
+            if state["status"] in ("ready", "failed"):
+                yield f"event: done\ndata: {data}\n\n"
+                return
+            await asyncio.sleep(0.5)
+            quiet += 0.5
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/source")
+def meeting_source(meeting_id: str, download: bool = False, db: Session = Depends(get_db)):
+    """The uploaded transcript exactly as received (UTF-8 text)."""
+    meeting = get_meeting(db, meeting_id)
+    if meeting.source_text is None:
+        raise HTTPException(404, "The original file was not stored for this meeting.")
+    name = meeting.source_name or f"{meeting.title}.txt"
+    safe = (
+        "".join(ch if ch.isalnum() or ch in "._- " else "_" for ch in name).strip()
+        or "transcript.txt"
+    )
+    headers = {"Cache-Control": "no-store"}
+    if download:
+        headers["Content-Disposition"] = (
+            f"attachment; filename=\"{safe}\"; filename*=UTF-8''{quote(name)}"
+        )
+    return PlainTextResponse(meeting.source_text, headers=headers)
+
+
 @app.post("/api/meetings/{meeting_id}/retry", status_code=202)
 def retry(meeting_id: str, db: Session = Depends(get_db)):
     meeting = get_meeting(db, meeting_id)
@@ -166,6 +260,7 @@ def retry(meeting_id: str, db: Session = Depends(get_db)):
     db.execute(delete(Chunk).where(Chunk.meeting_id == meeting_id))
     db.execute(delete(Message).where(Message.meeting_id == meeting_id))
     meeting.notes, meeting.error, meeting.status = None, None, "queued"
+    meeting.progress = None
     db.commit()
     return summary(meeting)
 
@@ -272,10 +367,7 @@ def connect_anthropic(body: AIConnection, request: Request, db: Session = Depend
     origin = request.headers.get("origin")
     if origin and origin not in settings.cors_origins:
         raise HTTPException(403, "Unknown origin.")
-    if db.scalar(select(Meeting.id).where(Meeting.status.in_(["queued", "processing"])).limit(1)):
-        raise HTTPException(
-            409, "Wait for meeting processing to finish before changing AI settings."
-        )
+    ensure_idle(db)
     key = body.api_key.get_secret_value().strip()
     if not key or len(key) > 500:
         raise HTTPException(422, "Enter a valid Anthropic API key.")
@@ -291,7 +383,71 @@ def connect_anthropic(body: AIConnection, request: Request, db: Session = Depend
     except Exception as exc:
         log.warning("ai_connection_failed error_type=%s", type(exc).__name__)
         raise HTTPException(502, provider_error(exc)) from exc
-    # Shared settings object is also used by the ingestion worker. Never persist or return the key.
+    # Saved encrypted so restarts keep it; never returned to the browser.
+    stored_settings.save(db, anthropic_api_key=key, ai_mode="anthropic")
     settings.anthropic_api_key = SecretStr(key)
     settings.ai_mode = "anthropic"
     return {"mode": "anthropic", "model": settings.anthropic_model}
+
+
+def key_hint(secret: SecretStr) -> str | None:
+    """Last four characters only, so the user can tell which key is active."""
+    value = secret.get_secret_value()
+    return f"…{value[-4:]}" if len(value) >= 12 else ("…" if value else None)
+
+
+def ensure_idle(db: Session):
+    if db.scalar(select(Meeting.id).where(Meeting.status.in_(["queued", "processing"])).limit(1)):
+        raise HTTPException(
+            409, "Wait for meeting processing to finish before changing AI settings."
+        )
+
+
+@app.get("/api/settings", dependencies=[Depends(local_request)])
+def connection_settings():
+    return {
+        "ai": {
+            "mode": settings.ai_mode,
+            "model": settings.anthropic_model
+            if settings.ai_mode == "anthropic"
+            else settings.llm_model
+            if settings.ai_mode == "openai"
+            else None,
+            "key_hint": key_hint(settings.anthropic_api_key)
+            if settings.ai_mode == "anthropic"
+            else key_hint(settings.openai_api_key)
+            if settings.ai_mode == "openai"
+            else None,
+        },
+        "voice": {
+            "connected": bool(settings.elevenlabs_api_key.get_secret_value()),
+            "key_hint": key_hint(settings.elevenlabs_api_key),
+            "voice_id": settings.elevenlabs_voice_id,
+        },
+    }
+
+
+@app.delete("/api/settings/anthropic", dependencies=[Depends(local_request)])
+def disconnect_anthropic(db: Session = Depends(get_db)):
+    ensure_idle(db)
+    # Session-only removal: a key in .env is read again on the next backend restart.
+    # An empty saved value records the removal, so a .env key does not return on restart.
+    removal = {"anthropic_api_key": ""}
+    if settings.ai_mode == "anthropic":
+        removal["ai_mode"] = "demo"
+    stored_settings.save(db, **removal)
+    settings.anthropic_api_key = SecretStr("")
+    if settings.ai_mode == "anthropic":
+        settings.ai_mode = "demo"
+    return {"mode": settings.ai_mode}
+
+
+@app.delete("/api/settings/elevenlabs", dependencies=[Depends(local_request)])
+def disconnect_elevenlabs(db: Session = Depends(get_db)):
+    stored_settings.save(db, elevenlabs_api_key="")
+    settings.elevenlabs_api_key = SecretStr("")
+    return {"connected": False}
+
+
+# Last, so the optional built frontend never shadows an /api route.
+configure_hosting(app, settings)

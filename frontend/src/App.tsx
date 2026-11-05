@@ -24,8 +24,12 @@ import { VoiceAssistant } from "./components/VoiceAssistant";
 import { Sidebar } from "./components/Sidebar";
 import { MeetingLibrary } from "./components/MeetingLibrary";
 import { AISettings } from "./components/AISettings";
+import { EmptyState } from "./components/EmptyState";
+import { TranscriptViews } from "./components/TranscriptViews";
+import { ProcessingProgress } from "./components/ProcessingProgress";
+import { ActionItems } from "./components/ActionItems";
 import { Button } from "./components/ui/button";
-import { api, clock } from "./api";
+import { api, ApiError, clock } from "./api";
 import { sample } from "./sample";
 import type { Detail, Meeting, Message, Note, Source } from "./types";
 
@@ -44,6 +48,12 @@ export default function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selected, setSelected] = useState<string | null>(meetingFromHash);
   const [detail, setDetail] = useState<Detail | null>(null);
+  // "missing" = the meeting no longer exists (deleted, or an old link); otherwise a load error.
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailAttempt, setDetailAttempt] = useState(0);
+  // True while a Server-Sent Events stream delivers processing progress for the open meeting.
+  const [live, setLive] = useState(false);
+  const liveRef = useRef(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState("");
   const [aiSettings, setAISettings] = useState(false);
@@ -78,6 +88,7 @@ export default function App() {
 
   function openMeeting(id: string | null) {
     setSelected(id);
+    setDetailError(null);
     setEvidence(null);
     setError("");
     window.location.hash = id ? `/meetings/${id}` : "/meetings";
@@ -119,6 +130,7 @@ export default function App() {
     }
     let active = true;
     setDetail(null);
+    setDetailError(null);
     setMessages([]);
     setEvidence(null);
     setTab("overview");
@@ -135,24 +147,93 @@ export default function App() {
         }
       })
       .catch(e => {
-        if (active) setError(e.message);
+        if (!active) return;
+        if (e instanceof ApiError && e.status === 404) {
+          setDetailError("missing");
+          loadList().catch(() => {});
+        } else setDetailError((e as Error).message);
       });
     return () => {
       active = false;
     };
-  }, [selected]);
+  }, [selected, detailAttempt]);
+  const processingId =
+    detail && ["queued", "processing"].includes(detail.status) ? detail.id : null;
+  useEffect(() => {
+    if (!processingId || typeof EventSource === "undefined") return;
+    const id = processingId;
+    const source = new EventSource(`/api/meetings/${id}/events`);
+    const stopLive = () => {
+      liveRef.current = false;
+      setLive(false);
+    };
+    liveRef.current = true;
+    setLive(true);
+    // Some proxies (e.g. Cloudflare Quick Tunnels) hold the whole stream until it ends.
+    // The server sends a first event immediately, so silence means buffering: poll instead.
+    const buffered = setTimeout(() => {
+      source.close();
+      stopLive();
+    }, 3000);
+    source.addEventListener("progress", event => {
+      clearTimeout(buffered);
+      const state = JSON.parse((event as MessageEvent).data);
+      setDetail(d =>
+        d && d.id === id
+          ? { ...d, status: state.status, error: state.error, progress: state.progress }
+          : d
+      );
+    });
+    source.addEventListener("done", async event => {
+      clearTimeout(buffered);
+      source.close();
+      stopLive();
+      const state = JSON.parse((event as MessageEvent).data);
+      if (state.status === "deleted") {
+        if (current.current === id) setDetailError("missing");
+        return;
+      }
+      try {
+        const [meeting, history] = await Promise.all([
+          api<Detail>(`/meetings/${id}`),
+          api<Message[]>(`/meetings/${id}/messages`),
+        ]);
+        if (current.current === id) {
+          setDetail(meeting);
+          setMessages(history);
+        }
+        await loadList();
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    });
+    // Proxies or a restart can drop the stream: fall back to polling instead of retrying.
+    source.onerror = () => {
+      clearTimeout(buffered);
+      source.close();
+      stopLive();
+    };
+    return () => {
+      clearTimeout(buffered);
+      source.close();
+      stopLive();
+    };
+  }, [processingId]);
   useEffect(() => {
     if (!meetings.some(m => ["queued", "processing"].includes(m.status))) return;
     const interval = setInterval(async () => {
       try {
         await loadList();
-        if (current.current) {
+        if (current.current && !liveRef.current) {
           const id = current.current;
           const result = await api<Detail>(`/meetings/${id}`);
           if (current.current === id) setDetail(result);
         }
       } catch (e) {
-        setError((e as Error).message);
+        if (e instanceof ApiError && e.status === 404) {
+          setDetail(null);
+          setDetailError("missing");
+        } else setError((e as Error).message);
       }
     }, 1500);
     return () => clearInterval(interval);
@@ -167,18 +248,35 @@ export default function App() {
     return () => previous?.focus();
   }, [modal]);
 
-  async function upload(file: File) {
+  async function upload(input: File | File[]) {
+    const files = Array.isArray(input) ? input : [input];
+    if (!files.length) return;
     setUploading(true);
     setError("");
-    const body = new FormData();
-    body.append("file", file);
+    const imported: Meeting[] = [];
+    const failed: string[] = [];
     try {
-      const meeting = await api<Meeting>("/meetings", { method: "POST", body });
-      await loadList();
-      openMeeting(meeting.id);
-      setModal(false);
-    } catch (e) {
-      setError((e as Error).message);
+      // One at a time: the API validates and queues each transcript independently.
+      for (const file of files) {
+        const body = new FormData();
+        body.append("file", file);
+        try {
+          imported.push(await api<Meeting>("/meetings", { method: "POST", body }));
+        } catch (e) {
+          failed.push(
+            files.length > 1 ? `${file.name}: ${(e as Error).message}` : (e as Error).message
+          );
+        }
+      }
+      await loadList().catch(() => {});
+      if (imported.length) setModal(false);
+      if (imported.length === 1 && files.length === 1) openMeeting(imported[0].id);
+      else if (imported.length) openMeeting(null);
+      if (failed.length)
+        setError(
+          (files.length > 1 ? `Imported ${imported.length} of ${files.length} transcripts. ` : "") +
+            failed.join(" · ")
+        );
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -246,7 +344,9 @@ export default function App() {
   function exportNotes() {
     if (!detail) return;
     let content = `# ${detail.title}\n\nMode: ${detail.mode}\n\n`;
-    for (const [heading, items] of Object.entries(detail.notes ?? {})) {
+    const sections = ["summary", "decisions", "actions", "questions"] as const;
+    for (const heading of sections) {
+      const items = detail.notes?.[heading] ?? [];
       content += `## ${heading}\n\n`;
       for (const item of items as Note[])
         content += `- ${item.text}${"owner" in item ? ` — Owner: ${item.owner ?? "Not specified"}; Deadline: ${item.deadline ?? "Not specified"}` : ""}\n${item.source_ids
@@ -338,7 +438,11 @@ export default function App() {
       <main className="main">
         <header className="topbar">
           <div>
-            <button className="breadcrumb-link" onClick={() => openMeeting(null)}>
+            <button
+              className="breadcrumb-link"
+              onClick={() => openMeeting(null)}
+              aria-label={selected ? "Back to meetings" : undefined}
+            >
               Meetings
             </button>
             {selected && (
@@ -347,6 +451,15 @@ export default function App() {
                 <strong>{detail?.title ?? "Meeting details"}</strong>
               </>
             )}
+          </div>
+          <div className="topbar-account">
+            <div className="topbar-profile" title="Personal workspace">
+              <span className="avatar">P</span>
+              <div className="topbar-profile-label">
+                <strong>Personal workspace</strong>
+                <small>Meeting intelligence</small>
+              </div>
+            </div>
           </div>
         </header>
         {error && (
@@ -368,18 +481,70 @@ export default function App() {
               upload(new File([sample], "Atlas beta launch.txt", { type: "text/plain" }))
             }
           />
+        ) : detailError === "missing" ? (
+          <EmptyState
+            art="missing"
+            role="status"
+            title="This meeting isn’t available"
+            actions={
+              <>
+                <Button onClick={() => openMeeting(null)}>
+                  <ArrowLeft size={16} /> Back to meetings
+                </Button>
+                <Button variant="outline" onClick={() => setModal(true)}>
+                  <Upload size={16} /> Import meetings
+                </Button>
+              </>
+            }
+          >
+            It may have been deleted, or the link is from an earlier workspace. Your other meetings
+            are still in the library.
+          </EmptyState>
+        ) : detailError ? (
+          <EmptyState
+            art="error"
+            role="alert"
+            title="We couldn’t load this meeting"
+            actions={
+              <>
+                <Button onClick={() => setDetailAttempt(n => n + 1)}>Try again</Button>
+                <Button variant="outline" onClick={() => openMeeting(null)}>
+                  <ArrowLeft size={16} /> Back to meetings
+                </Button>
+              </>
+            }
+          >
+            {detailError}
+          </EmptyState>
         ) : !detail ? (
-          <div className="loading">
+          <div className="loading" role="status">
             <Loader2 className="spin" /> Loading meeting…
           </div>
         ) : (
           <>
             <section className="meeting-header">
-              <button className="back-to-meetings" onClick={() => openMeeting(null)}>
-                <ArrowLeft size={17} /> Back to meetings
-              </button>
               <div className="title-row">
-                <h1>{detail.title}</h1>
+                <div className="title-block">
+                  <div className="title-line">
+                    <h1 title={detail.title}>{detail.title}</h1>
+                    <span className={`ready-pill status-${detail.status}`}>
+                      {ready ? <Check size={12} /> : <Loader2 className="spin" size={12} />}
+                      {detail.status}
+                    </span>
+                  </div>
+                  <div className="meeting-meta">
+                    <span>
+                      <Clock3 size={13} />
+                      {clock(detail.duration)}
+                    </span>
+                    <span>
+                      <Users size={13} />
+                      {detail.speakers.length} participants
+                    </span>
+                    <span>{detail.turn_count} turns</span>
+                    <span>Uploaded {date}</span>
+                  </div>
+                </div>
                 <div className="header-actions">
                   <Button variant="outline" onClick={exportNotes} disabled={!ready}>
                     <ArrowDownToLine size={15} /> Export notes
@@ -413,21 +578,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="meeting-meta">
-                <span>
-                  <Clock3 size={14} />
-                  {clock(detail.duration)} last timestamp
-                </span>
-                <span>
-                  <Users size={14} />
-                  {detail.speakers.length} participants
-                </span>
-                <span>Uploaded {date}</span>
-                <span className="ready-pill">
-                  {ready ? <Check size={12} /> : <Loader2 className="spin" size={12} />}
-                  {detail.status}
-                </span>
-              </div>
             </section>
             <div className="workspace-grid">
               <section className="notes-pane">
@@ -451,38 +601,37 @@ export default function App() {
                 </div>
                 <div className="notes-scroll">
                   {!ready ? (
-                    <div className="processing-card">
-                      <AudioLines size={32} />
-                      <h2>
-                        {detail.status === "failed"
-                          ? "Processing needs attention"
-                          : "Making sense of your meeting"}
-                      </h2>
-                      <p>
-                        {detail.error ??
-                          "Parsing speakers, preparing evidence, and organizing the conversation. This page updates automatically."}
-                      </p>
-                      {detail.status === "failed" && (
-                        <Button onClick={reprocess}>Retry processing</Button>
-                      )}
-                    </div>
+                    <ProcessingProgress meeting={detail} live={live} onRetry={reprocess} />
                   ) : (
                     <>
                       {detail.mode === "demo" && (
                         <div className="demo-notice">
                           <Sparkles size={17} />
                           <p>
-                            <strong>You’re exploring demo mode.</strong> Search real transcript
-                            passages. AI summaries and synthesized answers need an API key.
-                            <button
-                              className="text-button"
-                              onClick={() => {
-                                setSettingsTab("ai");
-                                setAISettings(true);
-                              }}
-                            >
-                              Connect Claude <ArrowRight size={14} />
-                            </button>
+                            {mode === "anthropic" || mode === "openai" ? (
+                              <>
+                                <strong>Processed before Claude was connected.</strong> Reprocess to
+                                add summaries, decisions, action items, emotions and speaker
+                                summaries. This clears the meeting’s chat history.
+                                <button className="text-button" onClick={reprocess}>
+                                  Reprocess with Claude <ArrowRight size={14} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <strong>You’re exploring demo mode.</strong> Search real transcript
+                                passages. AI summaries and synthesized answers need an API key.
+                                <button
+                                  className="text-button"
+                                  onClick={() => {
+                                    setSettingsTab("ai");
+                                    setAISettings(true);
+                                  }}
+                                >
+                                  Connect Claude <ArrowRight size={14} />
+                                </button>
+                              </>
+                            )}
                           </p>
                         </div>
                       )}
@@ -558,36 +707,26 @@ export default function App() {
                             unspecified.
                           </p>
                           <div className="content-card">
-                            <NoteList items={detail.notes?.actions ?? []} kind="action items" />
+                            <ActionItems
+                              items={detail.notes?.actions ?? []}
+                              sources={detail.sources}
+                              onSource={showSource}
+                              emptyText={
+                                detail.mode === "demo"
+                                  ? "Available with AI mode. Explore the original transcript below."
+                                  : "No action items explicitly identified in this transcript."
+                              }
+                            />
                           </div>
                         </>
                       )}
                       {tab === "transcript" && (
-                        <>
-                          <div className="section-label">
-                            <AudioLines size={17} />
-                            <h2>The original conversation</h2>
-                            <span>{detail.turn_count} TURNS</span>
-                          </div>
-                          <div className="transcript">
-                            {detail.turns.map(turn => (
-                              <article id={`turn-${turn.id}`} key={turn.id}>
-                                <span
-                                  className={`speaker-avatar person-color-${detail.speakers.indexOf(turn.speaker) % 4}`}
-                                >
-                                  {turn.speaker[0]}
-                                </span>
-                                <div>
-                                  <div className="turn-heading">
-                                    <strong>{turn.speaker}</strong>
-                                    <time>{clock(turn.seconds)}</time>
-                                  </div>
-                                  <p>{turn.text}</p>
-                                </div>
-                              </article>
-                            ))}
-                          </div>
-                        </>
+                        <TranscriptViews
+                          key={detail.id}
+                          detail={detail}
+                          aiAvailable={mode === "anthropic" || mode === "openai"}
+                          onReprocess={reprocess}
+                        />
                       )}
                       <div className="evidence-footer">
                         <ShieldCheck size={14} /> Keep the source close. Verify important decisions.
@@ -758,6 +897,8 @@ export default function App() {
             setAISettings(false);
             if (selected) reprocess();
           }}
+          onDisconnected={setMode}
+          onVoiceDisconnected={() => setVoiceSettingsVersion(v => v + 1)}
         />
       )}
       {modal && (
@@ -801,7 +942,7 @@ export default function App() {
               <Upload size={25} />
             </div>
             <h2 id="upload-title">Bring your meeting to Minutes.</h2>
-            <p>Upload a timestamped transcript. We’ll take it from here.</p>
+            <p>Import one or more timestamped transcripts. We’ll take it from here.</p>
             <button
               className="dropzone"
               disabled={uploading}
@@ -809,31 +950,49 @@ export default function App() {
               onDragOver={e => e.preventDefault()}
               onDrop={e => {
                 e.preventDefault();
-                if (!uploading && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+                if (!uploading && e.dataTransfer.files.length) upload([...e.dataTransfer.files]);
               }}
             >
               {uploading ? <Loader2 className="spin" /> : <FileText size={30} />}
               <strong>
-                {uploading ? "Uploading transcript…" : "Choose a transcript or drop it here"}
+                {uploading ? "Importing transcripts…" : "Choose transcripts or drop them here"}
               </strong>
-              <small>UTF-8 .txt · up to 250 KB / 60,000 characters</small>
+              <small>.txt, .vtt or .srt · UTF-8 · up to 250 KB / 60,000 characters each</small>
             </button>
             <input
               ref={fileRef}
               type="file"
-              accept=".txt,text/plain"
+              accept=".txt,.vtt,.srt,text/plain,text/vtt,application/x-subrip"
+              multiple
               className="sr-only"
               tabIndex={-1}
               onChange={e => {
-                if (e.target.files?.[0]) upload(e.target.files[0]);
+                if (e.target.files?.length) upload([...e.target.files]);
               }}
             />
             <div className="format-example">
-              <span>EXPECTED FORMAT</span>
-              <pre>
-                [00:00] Maya: Let’s review the launch.{"\n"}[00:35] Leo: I’ll finish testing by
-                Friday.
-              </pre>
+              <span>WORKS WITH</span>
+              <ul className="format-list">
+                <li>
+                  <code>[00:35] Leo: I’ll finish testing by Friday.</code>
+                  <small>also 00:35:12, milliseconds, or “Leo (00:35): …”</small>
+                </li>
+                <li>
+                  <code>Speaker 1 0:35</code>
+                  <small>Otter and Google Meet exports, text on the next lines</small>
+                </li>
+                <li>
+                  <code>WEBVTT · SRT</code>
+                  <small>Zoom, Teams and subtitle files</small>
+                </li>
+                <li>
+                  <code>Leo: No timestamps?</code>
+                  <small>times are estimated and marked ≈</small>
+                </li>
+              </ul>
+              <small className="format-note">
+                Comment lines (#) and titles before the conversation are skipped.
+              </small>
             </div>
             {error && (
               <p role="alert" className="modal-error">

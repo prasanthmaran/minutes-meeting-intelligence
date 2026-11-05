@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, ForeignKey, String, Text, create_engine, event
+from sqlalchemy import JSON, ForeignKey, String, Text, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import get_settings
@@ -31,6 +31,11 @@ class Meeting(Base):
     error: Mapped[str | None] = mapped_column(Text)
     turns: Mapped[list] = mapped_column(JSON)
     notes: Mapped[dict | None] = mapped_column(JSON)
+    # Live processing steps, streamed to the browser while status is queued/processing.
+    progress: Mapped[dict | None] = mapped_column(JSON)
+    # The uploaded file exactly as received (deferred: only loaded when requested).
+    source_text: Mapped[str | None] = mapped_column(Text, deferred=True)
+    source_name: Mapped[str | None] = mapped_column(String(255))
     chunks: Mapped[list["Chunk"]] = relationship(cascade="all, delete-orphan")
     messages: Mapped[list["Message"]] = relationship(cascade="all, delete-orphan")
 
@@ -61,17 +66,49 @@ class Message(Base):
     citations: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class StoredSetting(Base):
+    """Connection settings saved from the Settings dialog; secrets are encrypted."""
+
+    __tablename__ = "app_settings"
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(default=now)
+
+
+def normalize_url(url: str) -> str:
+    """Accept Supabase/Neon style postgres:// URLs; this project ships the psycopg 3 driver."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
 def make_engine(url: str):
-    engine = create_engine(
-        url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {}
-    )
+    url = normalize_url(url)
     if url.startswith("sqlite"):
+        engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 5})
 
         @event.listens_for(engine, "connect")
-        def enable_foreign_keys(connection, _):
+        def configure_sqlite(connection, _):
             connection.execute("PRAGMA foreign_keys=ON")
+            # WAL lets reads continue during a write (API requests + ingestion worker,
+            # or dev and hosted processes on one file). Writers wait instead of failing.
+            if ":memory:" not in url:
+                connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=5000")
+            connection.execute("PRAGMA synchronous=NORMAL")
 
-    return engine
+        return engine
+    # Hosted Postgres (e.g. Supabase pooler) closes idle connections: check before use.
+    # prepare_threshold=None keeps psycopg compatible with PgBouncer transaction pooling.
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=5,
+        connect_args={"prepare_threshold": None, "connect_timeout": 10},
+    )
 
 
 engine = make_engine(get_settings().database_url)
@@ -81,3 +118,14 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 def get_db():
     with SessionLocal() as session:
         yield session
+
+
+def upgrade_sqlite(target) -> None:
+    """Create tables and add columns introduced after a dev SQLite file was created."""
+    Base.metadata.create_all(target)
+    columns = {c["name"] for c in inspect(target).get_columns("meetings")}
+    added = {"progress": "JSON", "source_text": "TEXT", "source_name": "VARCHAR(255)"}
+    with target.begin() as connection:
+        for name, kind in added.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE meetings ADD COLUMN {name} {kind}"))

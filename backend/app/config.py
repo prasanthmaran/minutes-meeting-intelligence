@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     elevenlabs_stt_model: str = "scribe_v2"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     max_upload_bytes: int = 250_000
+    # Review hosting only (scripts/prod.sh): shared login and built UI.
+    app_user: str = "reviewer"
+    app_password: SecretStr = SecretStr("")
+    frontend_dist: str = ""
 
 
 @lru_cache

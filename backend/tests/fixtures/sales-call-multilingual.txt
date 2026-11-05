@@ -1,0 +1,87 @@
+# SYNTHETIC TEST FIXTURE — fictional B2B SaaS sales call for Minutes product QA only.
+# Not a real meeting, company, product, or recording. No real Whisper output.
+# Fictional meeting date: Friday 6 November 2026, 11:00 IST (Asia/Calcutta).
+# Languages in dialogue: English + Tamil code-switching; brief Spanish quote. No Hindi.
+
+[00:00] Jordan_Hale: Hi everyone, thanks for joining. I'm Jordan Hale, account executive at CoralStack. With me is Divya from solutions.
+[00:12] Divya_Krishnan: Hello. I'm Divya Krishnan, solutions engineer. Happy to go deep on HarborNotes whenever useful.
+[00:24] Karthik_Menon: Hi Jordan, Divya. Karthik Menon, operations lead at Meridian Retail. Thanks for making time.
+[00:36] Sana_Iqbal: Sana Iqbal, finance. I'll stay for commercials and risk. I may have to drop at the hour.
+[00:48] Jordan_Hale: Perfect. Agenda is discovery, a short HarborNotes walkthrough, pricing, then next steps. Sound okay?
+[00:58] Karthik_Menon: சரி, okay. We want clarity on privacy and ERP integration before any money talk.
+[01:10] Sana_Iqbal: (firm) And I need a number I can defend to leadership. No open-ended pilots.
+[01:20] Jordan_Hale: (empathetic) Totally fair. We'll keep both of those front and center.
+[01:28] Divya_Krishnan: Quick context: HarborNotes is our meeting-ops workspace. Teams upload transcripts, get action items, owners, and follow-ups. Fictional demo tenant only today.
+[01:46] Karthik_Menon: We tried two tools last quarter. Summaries were okay, but owners kept getting wrong.
+[01:58] Jordan_Hale: Where does that hurt most day to day?
+[02:06] Karthik_Menon: (frustrated) Store launches. One missed owner and the whole plan slips a week. நான் personally chase பண்றேன் every Friday.
+[02:20] Sana_Iqbal: Soft cost is real. Hard cost is another SaaS seat tax. I'm anxious about stacking tools again.
+[02:32] Divya_Krishnan: (calm) Understood. We can scope a narrow pilot so you're not buying seats you won't use.
+[02:42] Jordan_Hale: Before numbers, two discovery questions. How many ops people would touch this in the first month?
+[02:54] Karthik_Menon: Core team twelve. Later maybe forty if stores roll in. Not fifty on day one.
+[03:06] Jordan_Hale: And systems of record?
+[03:12] Karthik_Menon: SAP for inventory, Slack for chase-ups, Google Drive for meeting packs. Integration இல்லனா adoption drop ஆகும்.
+[03:26] Divya_Krishnan: HarborNotes has Slack webhooks and a Drive folder watcher in the standard pack. SAP is phase-two via our partner connector, not in the base pilot.
+[03:42] Karthik_Menon: (anxious) So SAP is not in the pilot?
+[03:48] Divya_Krishnan: Correct. Pilot covers Slack + Drive + transcript upload. SAP mapping would be a separate statement of work after you decide.
+[04:02] Sana_Iqbal: (frustrated) That worries me. Vendors always say phase two.
+[04:10] Jordan_Hale: (empathetic) I'll put the SAP path in writing with a rough window, not a vague promise. Still not in today's pilot price.
+[04:24] Karthik_Menon: Okay... um, privacy next. Do you send transcript text to a third-party model by default?
+[04:36] Divya_Krishnan: Default tenant is processing-region India with encryption at rest. Generative assist is opt-in. If you leave it off, we only run extractive pipelines on your tenant.
+[04:54] Sana_Iqbal: Opt-in must be off for the pilot. Legal will ask.
+[05:02] Jordan_Hale: Agreed. We'll configure generative assist disabled for Meridian's pilot workspace.
+[05:12] Karthik_Menon: (relieved) நல்லா இருக்கு. That was my biggest worry.
+[05:20] Divya_Krishnan: Also redaction presets for phone numbers and card patterns. We won't store payment instruments in HarborNotes.
+[05:32] Sana_Iqbal: Good. We are not sharing any card or bank details on this call either.
+[05:40] Jordan_Hale: Noted. No payment method collected today.
+[05:48] Jordan_Hale: Shall I share list pricing, then a pilot option?
+[05:56] Sana_Iqbal: Please. Start with list so I can see the delta.
+[06:04] Jordan_Hale: List for HarborNotes Business is eighteen lakh rupees per year for up to fifty seats, billed annually. That includes Slack, Drive, admin console, and standard support.
+[06:22] Sana_Iqbal: (anxious) Eighteen is above what I can approve alone. Our threshold without CTO sign-off is two lakh for experimental spend.
+[06:36] Jordan_Hale: Understood. If you prepaid annually we can offer twenty percent off that list, so fourteen point four lakh. That discount is conditional on a signed annual order form.
+[06:52] Sana_Iqbal: (firm) We are not signing an annual contract on this call. Full purchase is off the table until security clears and Arjun reviews.
+[07:06] Karthik_Menon: Arjun is our CTO. He is the decision maker for anything beyond a pilot. He is not on this call.
+[07:18] Jordan_Hale: (calm) Got it. Then let's talk pilot only. Eight-week pilot, twelve seats, Slack plus Drive, generative assist off, India region. Price one lakh fifty thousand rupees, fixed, invoice after kickoff.
+[07:40] Sana_Iqbal: One fifty is inside my pilot band. What is NOT included?
+[07:48] Divya_Krishnan: SAP connector, custom SSO beyond Google Workspace, and dedicated success manager. Those stay out unless you convert later.
+[08:02] Karthik_Menon: Timeline? You emailed last week saying go-live twenty-fourth November.
+[08:12] Jordan_Hale: That twenty-fourth November date was our proposed full-workspace launch if you bought annual. For a pilot, we can start earlier.
+[08:26] Divya_Krishnan: Security questionnaire needs to come back first. If Meridian returns it by Thursday twelfth November, we can kick off the pilot on Tuesday seventeenth November.
+[08:42] Karthik_Menon: (hesitant) um... twelfth is tight. Can questionnaire land Friday thirteenth?
+[08:52] Divya_Krishnan: Friday thirteenth works if legal doesn't add new sections. Kickoff would still hold Tuesday seventeenth if answers are complete.
+[09:04] Sana_Iqbal: Who owns the questionnaire on our side?
+[09:10] Karthik_Menon: I'll own drafting with InfoSec. Sana, can you review the data-processing addendum?
+[09:20] Sana_Iqbal: Yes. I'll review the DPA by Wednesday eleventh November. I won't approve payment until that review is done.
+[09:32] Jordan_Hale: On our side I'll send the questionnaire and draft pilot order today, Friday sixth November. Divya will schedule a thirty-minute technical deep-dive next Monday.
+[09:48] Divya_Krishnan: Monday ninth, eleven a.m. IST work for you, Karthik?
+[09:56] Karthik_Menon: சரி, Monday eleven is fine. Slack invite போட்டுடுங்க.
+[10:04] Jordan_Hale: One more commercial point. The twenty percent annual discount does not apply to the pilot. Pilot stays one lakh fifty thousand with no seat rollover into a future annual deal unless we renegotiate.
+[10:22] Sana_Iqbal: (relieved) Clear. So accepted terms today are pilot only: one fifty, twelve seats, eight weeks, generative off, no annual, no SAP.
+[10:36] Jordan_Hale: Exactly. And just to restate: Meridian is agreeing to a limited pilot pending security review, not a full HarborNotes purchase.
+[10:50] Karthik_Menon: Correct. Full purchase needs Arjun after the pilot readout.
+[10:58] Sana_Iqbal: Soft ask: can you share one reference in retail? Even anonymized.
+[11:08] Divya_Krishnan: We have a Mexico City specialty retailer on a similar Slack-first pilot. Their ops lead said, "Nos ayudó a no perder dueños en las juntas semanales." Happy to intro after NDA.
+[11:28] Karthik_Menon: (curious) Spanish customer okay. English write-up sufficient for me.
+[11:36] Jordan_Hale: I'll include a one-pager with the intro offer in today's email.
+[11:44] Karthik_Menon: Integration risk still open. If Slack webhooks fail in our workspace, what happens?
+[11:54] Divya_Krishnan: (calm) Fallback is CSV export of action items within fifteen minutes of meeting end. We'll show that path on Monday's deep-dive.
+[12:08] Karthik_Menon: (soft-spoken) Okay okay... that helps.
+[12:14] Sana_Iqbal: Unresolved for me: we still have no signed MSA. Redlines from our counsel are outstanding. Pilot order cannot countersign until MSA skeleton is agreed.
+[12:30] Jordan_Hale: (empathetic) Fair. I'll flag legal today. We will not treat the pilot as closed until MSA skeleton and security questionnaire both clear.
+[12:44] Divya_Krishnan: Just to confirm, we have not created an account ID or collected payment details yet. Invoice goes to Sana's AP alias after kickoff.
+[12:58] Sana_Iqbal: Use ap-invoices@meridianretail-example.com. Do not charge anything automatically.
+[13:08] Jordan_Hale: Confirmed. Manual invoice only.
+[13:14] Karthik_Menon: (excited) If pilot works, store managers will love Tamil summaries. English minutes plus Tamil action bullets would be huge for Chennai DCs.
+[13:28] Divya_Krishnan: (warm) We can enable bilingual action bullets in pilot week three if InfoSec signs off on the language pack. Not promised for day one.
+[13:42] Karthik_Menon: Day one English is fine. Week three optional. நான் team-கிட்ட overpromise பண்ண மாட்டேன்.
+[13:54] Sana_Iqbal: I need to drop. Summary of what I am approving in principle: limited eight-week pilot at one lakh fifty thousand, twelve seats, pending security and MSA skeleton. Not the eighteen lakh annual, not the fourteen point four discounted annual.
+[14:16] Jordan_Hale: Perfect restatement. Thank you, Sana.
+[14:22] Sana_Iqbal: Talk soon. Bye.
+[14:28] Karthik_Menon: Action check from my side: questionnaire draft by Thursday twelfth and completed answers by Friday thirteenth, deep-dive Monday ninth, pilot target start Tuesday seventeenth November twenty twenty-six.
+[14:40] Divya_Krishnan: I'll send the architecture one-pager and Slack webhook diagram today before six p.m. IST.
+[14:48] Jordan_Hale: I'll send pilot order draft, questionnaire, and Mexico reference one-pager within the hour. Thanks both.
+[14:56] Karthik_Menon: நன்றி Jordan, Divya. Good call. Bye.
+[15:02] Divya_Krishnan: Bye Karthik. Speak Monday.
+[15:06] Jordan_Hale: Thanks everyone. Ending here.
+[15:08] Unidentified_speaker: (inaudible overlapping goodbye, about two seconds)
+[15:12] Karthik_Menon: (soft-spoken, fading) Okay... bye bye.

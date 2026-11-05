@@ -29,3 +29,24 @@ def test_lexical_retrieval_ranks_relevant_evidence_first():
     ]
     assert lexical_rank(chunks, "security review")[0][0].id == "a"
     assert lexical_rank(chunks, "volcanoes") == []
+
+
+def test_search_tokens_keep_any_script_whole():
+    from app.intelligence import tokens
+
+    assert tokens("நான் personally chase பண்றேன்") == ["நான்", "personally", "chase", "பண்றேன்"]
+    assert tokens("Nos ayudó a no perder dueños") == ["nos", "ayudó", "no", "perder", "dueños"]
+    assert tokens("ÉCOLE") == tokens("école")
+
+
+def test_tamil_question_retrieves_the_tamil_passage():
+    from types import SimpleNamespace
+
+    from app.intelligence import lexical_rank
+
+    chunks = [
+        SimpleNamespace(id="en", text="Karthik: Slack invite please, Monday works."),
+        SimpleNamespace(id="ta", text="Karthik: நான் team-கிட்ட overpromise பண்ண மாட்டேன்."),
+    ]
+    ranked = lexical_rank(chunks, "overpromise மாட்டேன்")
+    assert ranked[0][0].id == "ta"

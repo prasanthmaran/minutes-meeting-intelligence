@@ -9,3 +9,6 @@ __pycache__/
 *.db-*
 *.log
 *.tsbuildinfo
+.cloudflare/
+.dev/
+.secrets/

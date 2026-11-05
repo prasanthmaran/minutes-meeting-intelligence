@@ -23,3 +23,30 @@ it('shows key rejection without enabling AI', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('rejected');
   expect(connected).not.toHaveBeenCalled();
 });
+it('shows a connected key as masked with replace and remove actions', async () => {
+  const disconnected = vi.fn();
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => ({
+    ok: true,
+    status: 200,
+    json: async () =>
+      init?.method === 'DELETE'
+        ? { mode: 'demo' }
+        : url === '/api/settings'
+          ? { ai: { mode: 'anthropic', model: 'claude-haiku', key_hint: '…abcd' }, voice: { connected: false, key_hint: null, voice_id: 'v' } }
+          : {},
+  }));
+  vi.stubGlobal('fetch', fetch);
+  render(<AISettings mode="anthropic" onClose={vi.fn()} onConnected={vi.fn()} onDisconnected={disconnected} />);
+  expect(await screen.findByText('••••••••abcd')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Anthropic API key')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Replace key' }));
+  expect(screen.getByLabelText('New Anthropic API key')).toHaveAttribute('type', 'password');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
+  await waitFor(() => expect(disconnected).toHaveBeenCalledWith('demo'));
+  expect(fetch).toHaveBeenCalledWith('/api/settings/anthropic', expect.objectContaining({ method: 'DELETE' }));
+  expect(screen.getByLabelText('Anthropic API key')).toBeInTheDocument();
+});

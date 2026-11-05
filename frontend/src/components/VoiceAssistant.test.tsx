@@ -80,7 +80,7 @@ it("opens a dedicated agent window and closes it safely", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Close voice agent and end conversation" }));
   expect(screen.queryByRole("dialog", { name: "Minutes voice agent" })).not.toBeInTheDocument();
 });
-it("provides AI setup inside the agent when the reasoning connection is missing", async () => {
+it("live voice works independently of the text chat provider", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ connected: true }) }))
@@ -88,7 +88,6 @@ it("provides AI setup inside the agent when the reasoning connection is missing"
   render(<VoiceAssistant {...props} aiEnabled={false} />);
   fireEvent.click(screen.getByRole("button", { name: /Voice assistant/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Open conversation agent" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Connect Claude" }));
-  expect(props.onAISettings).toHaveBeenCalled();
-  expect(screen.queryByRole("dialog", { name: "Minutes voice agent" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Connect Claude" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Start conversation" })).toBeEnabled();
 });

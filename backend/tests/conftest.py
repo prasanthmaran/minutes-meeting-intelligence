@@ -6,6 +6,14 @@ from app.db import Base, get_db, make_engine
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def settings_encryption_key(monkeypatch):
+    # Tests never touch the real .secrets/settings.key.
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+
 @pytest.fixture
 def database(tmp_path):
     engine = make_engine(f"sqlite:///{tmp_path / 'test.db'}")

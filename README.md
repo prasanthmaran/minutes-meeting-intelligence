@@ -46,19 +46,21 @@ Docker is not needed for local development. The existing `compose.yaml` packages
 
 ## Voice assistant (ElevenLabs)
 
-1. Open **Settings → Voice · ElevenLabs**, enter a valid replacement ElevenLabs key, and click **Connect ElevenLabs**. The key needs voice-read, speech-to-text, and text-to-speech access. The app verifies voice-read access; STT/TTS permissions and credits are checked when used.
-2. Connect Claude in **Settings → AI connection** if needed, then open a ready meeting.
-3. Expand **Voice assistant**, click **Open conversation agent**, then press **Start conversation**. Allow microphone access. Speak a question and pause: local silence detection commits the turn after approximately 1.2 seconds of silence following speech.
-4. The app transcribes the question, submits it to the same meeting-scoped answer endpoint, generates speech, plays the answer automatically, and returns to **Listening**. Both sides of the conversation and citations appear in chat.
-5. **Interrupt & speak** stops playback and starts another listening turn. **End conversation** aborts local pending requests/playback and releases microphone access. Switching meetings also ends the session. A server-side generation already underway can still complete after client cancellation.
+Text chat continues to use Claude/OpenAI and validated citations. **Live voice is a separate ElevenLabs Agents conversation**, using WebRTC, streamed speech, automatic turn detection, and spoken interruptions. It does not require the text-chat Claude key.
 
-The interface displays Connecting, Listening, Understanding, Finding evidence, Preparing voice, and Speaking states. Manual recording/review and playback are still available under **Manual voice controls**.
+1. Connect ElevenLabs in Settings. The key needs voice-read plus Agents permissions to create a private agent and mint conversation tokens. Separate STT/TTS permissions are needed only for legacy manual controls.
+2. Open a ready meeting → Voice assistant → Open conversation agent → Start conversation. Allow microphone access.
+3. Speak naturally, interrupt by speaking, or mute/unmute. End or close the window to disconnect. Sessions are limited to ten minutes.
 
-Pipeline: microphone → local speech/silence detection → ElevenLabs Scribe → Claude/OpenAI with meeting evidence → ElevenLabs speech → playback → listen again. This is automatic two-way turn-taking, not full-duplex audio streaming or a hosted ElevenAgents bot. Interrupting playback requires the Interrupt button; speaking over the assistant does not automatically interrupt it. Latency includes separate STT, answer-generation, and TTS requests. Quiet surroundings help the simple RMS speech gate; no speech for 30 seconds ends the session. An individual spoken turn is capped at 30 seconds and the existing 5 MB upload limit.
+FastAPI creates and reuses a private generic agent per key/voice for the API process. It returns only a short-lived WebRTC token with `Cache-Control: no-store`. Restarting the process may create another agent; remove unused `Minutes live meeting voice v1` agents in ElevenLabs. Production should persist the agent ID and manage configuration migrations.
 
-Audio recordings and generated audio are not persisted by this app. Audio questions and answer text are sent to ElevenLabs and use account credits; provider retention follows your ElevenLabs account policy. Keys entered through Settings remain only in backend memory until restart. Use ignored `.env` variables `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_STT_MODEL`, and `ELEVENLABS_TTS_MODEL` for local persistent configuration. Microphone recording requires localhost/HTTPS and a compatible browser. Multilingual availability depends on the configured STT/TTS model and voice; not every language has been tested.
+The agent uses Gemini 2.5 Flash through ElevenLabs and Eleven Flash v2.5 speech, billed through ElevenLabs Agents. Greetings need no evidence tool. Meeting questions invoke a browser client tool that calls the meeting-scoped FastAPI evidence endpoint, so localhost needs no public webhook. Small transcripts (14k characters) are returned completely; larger ones use existing lexical retrieval. No additional Claude generation or query-rewrite request is made. This reduces serial round trips but multilingual lexical retrieval on large meetings remains a limitation.
 
-Provider references: [speech transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert), [speech generation](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).
+The prompt requires brief evidence-only spoken answers, abstention when evidence is missing, and treating transcript instructions as untrusted. Retrieved passages appear in the voice window. **These are retrieved evidence, not validated per-sentence citations.** The hosted agent's freeform speech has weaker enforcement than structured text chat; use text chat for auditable decisions. Voice messages are separate and not saved into text-chat history. Closing the window clears the local voice transcript.
+
+Audio and requested evidence are sent to ElevenLabs; provider transcript retention policies apply. Agent audio recording is disabled in configuration. Keys stay server-side in process memory and must be reconnected after a restart (or configured in an ignored local `.env`). End cancels application requests and closes an established SDK session; if connection setup is pending, it is closed as soon as the SDK returns. No microphone session or latency measurement has been claimed from mocked tests.
+
+References: [Agents client SDK](https://elevenlabs.io/docs/eleven-agents/libraries/javascript), [conversation tokens](https://elevenlabs.io/docs/eleven-agents/api-reference/conversations/get-webrtc-token).
 
 ## Features
 
@@ -187,4 +189,4 @@ Live Claude verification: four sample checks passed (owner/deadline, follow-up, 
 
 Navigation: the home screen lists meetings with title/participant search and a status filter. Select a meeting to open its details; **Back to meetings**, browser Back/Forward, and bookmarked `#/meetings/<id>` URLs are supported. The sidebar collapse handle sits on the top divider beside the logo, and the preference is saved locally. AI connection status and credentials are managed through **Settings**.
 
-The dedicated voice-agent window displays the selected meeting, an animated status orb, a live transcript, and Start/Interrupt/End controls. Closing the window or pressing Escape ends the session and releases the microphone. The agent offers direct AI setup when the reasoning connection is missing.
+The dedicated voice-agent window displays the selected meeting, an animated status orb, a live transcript, and Start/Mute/End controls. Closing the window or pressing Escape ends the session and releases the microphone. Live voice connects independently of the text-chat AI provider.

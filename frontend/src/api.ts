@@ -1,11 +1,21 @@
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, options);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(
+    throw new ApiError(
       typeof body?.detail === "string"
         ? body.detail
-        : `Request failed (${response.status}). Please try again.`
+        : `Request failed (${response.status}). Please try again.`,
+      response.status
     );
   }
   return response.status === 204 ? (undefined as T) : response.json();
