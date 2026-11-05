@@ -15,8 +15,8 @@
 #   ./scripts/prod.sh stop               Stop app and tunnel. Data is kept.
 #
 # Optional: APP_USER / APP_PASSWORD (default reviewer / random, kept across restarts).
-# Keys and DATABASE_URL come from the ignored project-root .env. Put AI_MODE and
-# ANTHROPIC_API_KEY there: keys entered in Settings are lost on every restart.
+# DATABASE_URL comes from the ignored project-root .env. Keys entered in Settings are
+# saved encrypted in that database and survive restarts (.env keys also work).
 
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -185,7 +185,7 @@ cmd_deploy() {
   verify_public
   summary
   echo
-  echo "  Note: keys entered in Settings were cleared by the restart unless they are in .env."
+  echo "  AI: $(curl -s -u "$(auth)" "$LOCAL_URL/api/health")"
 }
 
 cmd_status() {

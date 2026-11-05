@@ -19,9 +19,9 @@ for `cloudflared` (installed automatically on first production start).
 1. Copy the settings file: `cp .env.example .env`.
 2. Edit `.env`:
    - `DATABASE_URL`: keep the SQLite default, or use your Supabase Session pooler URI.
-   - `AI_MODE=anthropic` and `ANTHROPIC_API_KEY=...` so Claude survives restarts.
-     Keys entered in **Settings** live only in memory and are cleared by every restart.
-   - Optional: `ELEVENLABS_API_KEY=...` for voice.
+   - Claude and ElevenLabs keys: enter them once in **Settings**. They are saved encrypted
+     in the database (key file `.secrets/settings.key`) and survive restarts. Keys in
+     `.env` (`AI_MODE`, `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`) also work.
 
 ## Development
 
@@ -80,7 +80,8 @@ Pick the smallest option that covers your change:
 4. Restarts the app; the tunnel keeps running.
 5. Checks the public URL.
 
-After a backend deploy, reconnect any keys you entered in Settings (or keep them in `.env`).
+Keys saved in Settings stay connected across deploys. Back up `.secrets/settings.key`;
+without it, saved keys cannot be read and must be entered again.
 
 ### Check, logs, stop
 ```bash
