@@ -30,7 +30,7 @@ Open http://localhost:5173. Vite proxies `/api` to the backend. SQLite persists 
 
 ### Enable AI generation
 
-**Claude / Anthropic:** Click the mode badge at the top-right or **Connect Claude**, enter your Anthropic API key in the password field, then click **Connect and enable AI**. A short provider request checks access before enabling AI. The selected meeting is reprocessed automatically. Wait for **ready**, then ask a question. Keys entered in this dialog live only in backend memory and are cleared when the backend restarts. Never paste a key into chat or commit it to Git.
+**Claude / Anthropic:** Open **Settings** at the bottom of the sidebar, enter your Anthropic API key in the password field, then click **Connect and enable AI**. A short provider request checks access before enabling AI. The selected meeting is reprocessed automatically. Wait for **ready**, then ask a question. Keys entered in this dialog live only in backend memory and are cleared when the backend restarts. Never paste a key into chat or commit it to Git.
 
 For persistent local configuration, set `AI_MODE=anthropic` and `ANTHROPIC_API_KEY` in the ignored project-root `.env` and restart the backend. `ANTHROPIC_MODEL` defaults to `claude-haiku-4-5-20251001`. Claude mode uses local BM25 retrieval with no embedding API. For meetings whose chunks fit within 14,000 characters, the full discussion is provided so generic questions and later corrections have context; longer meetings use the top matching chunks. This is lexical retrieval, not semantic embeddings. Meeting content is sent to Anthropic for notes and answers.
 
@@ -160,10 +160,12 @@ First: authenticated ownership, live quality evaluation, temporal decision recon
 
 These show the real application in demo mode.
 
-![Meeting workspace — blue theme](docs/screenshots/blue-theme.jpg)
+![Meeting list with collapsible navigation](docs/screenshots/meeting-library.jpg)
 
-![Welcome screen](docs/screenshots/welcome.jpg)
+![Meeting details with larger text](docs/screenshots/meeting-details.jpg)
 
 Submission readiness and remaining work: [submission checklist](docs/submission-checklist.md).
 
 Live Claude verification: four sample checks passed (owner/deadline, follow-up, unsupported budget, proposed versus approved metric). See [the recorded evaluation](docs/evaluations/claude-core-2026-11-05.json) for actual responses and scope.
+
+Navigation: the home screen lists meetings with title/participant search and a status filter. Select a meeting to open its details; **Back to meetings**, browser Back/Forward, and bookmarked `#/meetings/<id>` URLs are supported. The sidebar collapse handle sits on the top divider beside the logo, and the preference is saved locally. AI connection status and credentials are managed through **Settings**.

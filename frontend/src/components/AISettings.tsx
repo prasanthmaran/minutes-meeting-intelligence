@@ -6,7 +6,9 @@ import { Button } from "./ui/button";
 export function AISettings({
   onClose,
   onConnected,
+  mode = "demo",
 }: {
+  mode?: string;
   onClose: () => void;
   onConnected: () => void;
 }) {
@@ -75,7 +77,17 @@ export function AISettings({
         <div className="intro-symbol">
           <KeyRound size={25} />
         </div>
-        <h2 id="ai-title">Connect Claude</h2>
+        <h2 id="ai-title">AI settings</h2>
+        <div className={`settings-connection ${mode === "demo" ? "disconnected" : ""}`}>
+          <span />
+          {mode === "anthropic"
+            ? "Claude enabled"
+            : mode === "openai"
+              ? "OpenAI enabled"
+              : mode === "demo"
+                ? "Demo · no API key"
+                : "Checking connection…"}
+        </div>
         <p>Get real answers, decisions, and action items from your meeting conversation.</p>
         <label className="key-label" htmlFor="anthropic-key">
           Anthropic API key
@@ -89,7 +101,11 @@ export function AISettings({
           spellCheck={false}
           value={key}
           onChange={e => setKey(e.target.value)}
-          placeholder="Enter your replacement API key"
+          placeholder={
+            mode === "anthropic"
+              ? "Enter a new key to change the connection"
+              : "Enter your Anthropic API key"
+          }
           maxLength={500}
           disabled={busy}
           required

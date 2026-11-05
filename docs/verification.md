@@ -3,7 +3,7 @@
 ## Verified locally
 
 - 28 backend automated tests passed, including simulated AI orchestration and invalid-citation rejection.
-- 5 frontend tests passed; TypeScript and production build passed.
+- 10 frontend tests passed; TypeScript and production build passed.
 - SQLite migration upgrade → downgrade → upgrade.
 - Browser: sample upload, processing to ready, transcript viewer, persisted chat, clickable evidence, and unsupported-topic response in demo mode.
 - Frontend dependency audit: zero reported vulnerabilities after test-tooling upgrades.
@@ -43,3 +43,7 @@ Provider: Anthropic, `claude-haiku-4-5-20251001`. The sample meeting was ready i
 | Proposal vs approval | Pilot metric remains proposed, awaiting product approval | Pass |
 
 Evidence: [recorded answers and citation checks](evaluations/claude-core-2026-11-05.json). This covers one sample; multilingual accuracy, prompt-injection resistance, and broad production reliability have not been established by this check.
+
+## Meeting navigation update
+
+The home screen is now a searchable/filterable meeting list. Browser checks verified opening details, returning to the list, collapsing the sidebar with its divider handle, and finding Claude status in Settings. Larger type is applied to notes, transcript, and chat. Responsive checks at 1440px and 390px confirmed the library is usable; the 390px page had no document-level horizontal overflow. New frontend tests cover navigation, bookmarked routes, search/status filters, collapsed preference, and Settings-only AI status.

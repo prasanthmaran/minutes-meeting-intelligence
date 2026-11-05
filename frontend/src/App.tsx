@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDownToLine,
+  ArrowLeft,
   ArrowRight,
   AudioLines,
   Check,
@@ -8,12 +9,9 @@ import {
   ChevronRight,
   Clock3,
   FileText,
-  FolderOpen,
   Loader2,
   MessageSquare,
   MoreHorizontal,
-  Plus,
-  Search,
   Send,
   ShieldCheck,
   Sparkles,
@@ -22,6 +20,8 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { Sidebar } from "./components/Sidebar";
+import { MeetingLibrary } from "./components/MeetingLibrary";
 import { AISettings } from "./components/AISettings";
 import { Button } from "./components/ui/button";
 import { api, clock } from "./api";
@@ -35,15 +35,29 @@ const prompts = [
   "What is still unresolved?",
 ];
 
+function meetingFromHash() {
+  return window.location.hash.match(/^#\/meetings\/([a-zA-Z0-9-]+)$/)?.[1] ?? null;
+}
+
 export default function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(meetingFromHash);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState("");
   const [aiSettings, setAISettings] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
-  const [search, setSearch] = useState("");
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return (
+        (window.localStorage.getItem("minutes.sidebarCollapsed") ??
+          String(window.innerWidth < 768)) === "true"
+      );
+    } catch {
+      return false;
+    }
+  });
   const [question, setQuestion] = useState("");
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -58,6 +72,28 @@ export default function App() {
   const modalClose = useRef<HTMLButtonElement>(null);
   current.current = selected;
 
+  function openMeeting(id: string | null) {
+    setSelected(id);
+    setEvidence(null);
+    setError("");
+    window.location.hash = id ? `/meetings/${id}` : "/meetings";
+  }
+  useEffect(() => {
+    const onRoute = () => {
+      setSelected(meetingFromHash());
+      setEvidence(null);
+    };
+    window.addEventListener("hashchange", onRoute);
+    return () => window.removeEventListener("hashchange", onRoute);
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("minutes.sidebarCollapsed", String(collapsed));
+    } catch {
+      /* Optional preference storage. */
+    }
+  }, [collapsed]);
+
   async function loadList() {
     setMeetings(await api<Meeting[]>("/meetings"));
   }
@@ -66,14 +102,15 @@ export default function App() {
       .then(([list, health]) => {
         setMeetings(list);
         setMode(health.mode);
-        setSelected(list[0]?.id ?? null);
       })
-      .catch(e => setError(e.message));
+      .catch(e => setError(e.message))
+      .finally(() => setLibraryLoading(false));
   }, []);
   useEffect(() => {
     if (!selected) {
       setDetail(null);
       setMessages([]);
+      setEvidence(null);
       return;
     }
     let active = true;
@@ -134,7 +171,7 @@ export default function App() {
     try {
       const meeting = await api<Meeting>("/meetings", { method: "POST", body });
       await loadList();
-      setSelected(meeting.id);
+      openMeeting(meeting.id);
       setModal(false);
     } catch (e) {
       setError((e as Error).message);
@@ -192,7 +229,7 @@ export default function App() {
       await api(`/meetings/${selected}`, { method: "DELETE" });
       const list = await api<Meeting[]>("/meetings");
       setMeetings(list);
-      setSelected(list[0]?.id ?? null);
+      openMeeting(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -281,94 +318,29 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <a href="#" className="brand" aria-label="Minutes home">
-          <span className="brand-icon">
-            <AudioLines size={24} />
-          </span>
-          minutes<span className="brand-dot">.</span>
-        </a>
-        <div className="workspace">
-          <span className="workspace-icon">P</span>
-          <div>
-            Personal workspace<small>Meeting intelligence</small>
-          </div>
-        </div>
-        <Button className="upload-main" onClick={() => setModal(true)}>
-          <Plus size={17} /> New meeting
-        </Button>
-        <div className="nav-heading">WORKSPACE</div>
-        <div className="nav-active">
-          <FolderOpen size={17} /> All meetings <span>{meetings.length}</span>
-        </div>
-        <label className="search">
-          <Search size={15} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Find a meeting…"
-            aria-label="Find a meeting"
-          />
-        </label>
-        <div className="nav-heading recent-heading">RECENT MEETINGS</div>
-        <nav className="meeting-list" aria-label="Meetings">
-          {meetings
-            .filter(m => m.title.toLowerCase().includes(search.toLowerCase()))
-            .map(m => (
-              <button
-                key={m.id}
-                className={`meeting-link ${selected === m.id ? "selected" : ""}`}
-                onClick={() => setSelected(m.id)}
-              >
-                <FileText size={16} />
-                <div>
-                  <span>{m.title}</span>
-                  <small>
-                    {m.status === "ready"
-                      ? `${m.speakers.length} participants · ${clock(m.duration)}`
-                      : m.status}
-                  </small>
-                </div>
-              </button>
-            ))}
-          {!meetings.length && <p className="sidebar-empty">Your conversations will live here.</p>}
-        </nav>
-        <div className="sidebar-bottom">
-          <ShieldCheck size={17} />
-          <div>
-            Evidence comes first<small>Every answer, back to its source.</small>
-          </div>
-        </div>
-        <div className="profile">
-          <span className="avatar">P</span>
-          <div>
-            Personal workspace<small>Local development</small>
-          </div>
-          <span className="status-dot" />
-        </div>
-      </aside>
+    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={() => setCollapsed(c => !c)}
+        onMeetings={() => openMeeting(null)}
+        onUpload={() => setModal(true)}
+        onSettings={() => setAISettings(true)}
+        isLibrary={!selected}
+      />
 
       <main className="main">
         <header className="topbar">
           <div>
-            Workspace <ChevronRight size={14} />
-            <strong>Meetings</strong>
+            <button className="breadcrumb-link" onClick={() => openMeeting(null)}>
+              Meetings
+            </button>
+            {selected && (
+              <>
+                <ChevronRight size={16} />
+                <strong>{detail?.title ?? "Meeting details"}</strong>
+              </>
+            )}
           </div>
-          <button
-            onClick={() => setAISettings(true)}
-            aria-label="Configure AI"
-            className={`mode-pill ${mode === "demo" ? "demo" : ""}`}
-          >
-            <span />
-            {mode === "demo"
-              ? "Demo · no API key"
-              : mode === "anthropic"
-                ? "Claude enabled"
-                : mode === "openai"
-                  ? "AI enabled"
-                  : "Connecting…"}
-          </button>
         </header>
         {error && (
           <div className="error-banner" role="alert">
@@ -379,65 +351,16 @@ export default function App() {
           </div>
         )}
         {!selected ? (
-          <section className="welcome">
-            <div className="eyebrow">
-              <span /> LESS SEARCHING. MORE CLARITY.
-            </div>
-            <h1>
-              Good conversations.
-              <br />
-              <em>Nothing lost.</em>
-            </h1>
-            <p>
-              Turn meeting transcripts into clear decisions, next steps, and answers you can trace
-              back to the conversation.
-            </p>
-            <div className="welcome-buttons">
-              <Button onClick={() => setModal(true)}>
-                <Upload size={17} /> Upload a transcript
-              </Button>
-              <Button
-                variant="outline"
-                disabled={uploading}
-                onClick={() =>
-                  upload(new File([sample], "Atlas beta launch.txt", { type: "text/plain" }))
-                }
-              >
-                {uploading ? <Loader2 className="spin" size={16} /> : <ArrowRight size={16} />}{" "}
-                Explore a sample
-              </Button>
-            </div>
-            <div className="welcome-preview">
-              <div className="preview-heading">
-                <AudioLines size={19} />
-                <strong>From conversation to clarity</strong>
-                <span>01 — 03</span>
-              </div>
-              <div className="preview-grid">
-                <div>
-                  <span>01</span>
-                  <FileText />
-                  <h3>Bring the conversation</h3>
-                  <p>Upload a transcript with speakers and timestamps.</p>
-                </div>
-                <div>
-                  <span>02</span>
-                  <CheckCheck />
-                  <h3>Find what matters</h3>
-                  <p>Separate decisions, action items, and open questions.</p>
-                </div>
-                <div>
-                  <span>03</span>
-                  <MessageSquare />
-                  <h3>Ask. Verify. Move on.</h3>
-                  <p>Get answers with evidence from the original meeting.</p>
-                </div>
-              </div>
-            </div>
-            <small className="welcome-foot">
-              A focused workspace for the things worth remembering.
-            </small>
-          </section>
+          <MeetingLibrary
+            meetings={meetings}
+            loading={libraryLoading}
+            onOpen={openMeeting}
+            onUpload={() => setModal(true)}
+            uploading={uploading}
+            onSample={() =>
+              upload(new File([sample], "Atlas beta launch.txt", { type: "text/plain" }))
+            }
+          />
         ) : !detail ? (
           <div className="loading">
             <Loader2 className="spin" /> Loading meeting…
@@ -445,9 +368,9 @@ export default function App() {
         ) : (
           <>
             <section className="meeting-header">
-              <div className="breadcrumb">
-                <FileText size={14} /> MEETING WORKSPACE
-              </div>
+              <button className="back-to-meetings" onClick={() => openMeeting(null)}>
+                <ArrowLeft size={17} /> Back to meetings
+              </button>
               <div className="title-row">
                 <h1>{detail.title}</h1>
                 <div className="header-actions">
@@ -776,6 +699,7 @@ export default function App() {
       </main>
       {aiSettings && (
         <AISettings
+          mode={mode}
           onClose={() => setAISettings(false)}
           onConnected={() => {
             setMode("anthropic");
