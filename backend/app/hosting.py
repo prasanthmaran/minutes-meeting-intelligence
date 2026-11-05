@@ -1,6 +1,6 @@
 """Optional single-port review hosting: shared-password gate and built frontend.
 
-Both are off unless APP_PASSWORD / FRONTEND_DIST are set (scripts/cloudflare-host.sh).
+Both are off unless APP_PASSWORD / FRONTEND_DIST are set (scripts/prod.sh).
 """
 
 import base64

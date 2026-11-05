@@ -61,6 +61,15 @@ class Message(Base):
     citations: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class StoredSetting(Base):
+    """Connection settings saved from the Settings dialog; secrets are encrypted."""
+
+    __tablename__ = "app_settings"
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(default=now)
+
+
 def normalize_url(url: str) -> str:
     """Accept Supabase/Neon style postgres:// URLs; this project ships the psycopg 3 driver."""
     for prefix in ("postgres://", "postgresql://"):

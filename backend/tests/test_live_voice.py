@@ -120,3 +120,12 @@ def test_configuration_error_is_actionable_and_redacts_key(client, database):
     assert response.status_code == 502
     assert "Invalid configuration" in response.text
     assert "private-test-key" not in response.text
+
+
+def test_english_agent_uses_an_english_tts_model():
+    from app.live_voice import agent_configuration
+
+    config = agent_configuration()["conversation_config"]
+    assert config["agent"]["language"] == "en"
+    # ElevenLabs rejects English agents unless TTS is turbo or flash v2 (not *_v2_5).
+    assert config["tts"]["model_id"] in ("eleven_flash_v2", "eleven_turbo_v2")

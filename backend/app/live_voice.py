@@ -73,7 +73,9 @@ def agent_configuration():
                     ],
                 },
             },
-            "tts": {"voice_id": settings.elevenlabs_voice_id, "model_id": "eleven_flash_v2_5"},
+            # ElevenLabs requires English agents to use the English-only turbo/flash v2
+            # models; the multilingual *_v2_5 models are rejected for language "en".
+            "tts": {"voice_id": settings.elevenlabs_voice_id, "model_id": "eleven_flash_v2"},
             "turn": {"turn_eagerness": "normal"},
             "conversation": {
                 "max_duration_seconds": 600,

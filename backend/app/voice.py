@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db import Meeting, Message, get_db
+from . import stored_settings
 
 router = APIRouter(prefix="/api")
 settings = get_settings()
@@ -54,7 +55,7 @@ def status():
 
 
 @router.post("/settings/elevenlabs", dependencies=[Depends(local_request)])
-def connect(body: VoiceConnection):
+def connect(body: VoiceConnection, db: Session = Depends(get_db)):
     key = body.api_key.get_secret_value().strip()
     if not key or len(key) > 500:
         raise HTTPException(422, "Enter a valid ElevenLabs API key.")
@@ -83,6 +84,8 @@ def connect(body: VoiceConnection):
     except Exception as exc:
         log.warning("voice_connection_failed error_type=%s", type(exc).__name__)
         raise HTTPException(502, failure(exc)) from exc
+    # Saved encrypted so restarts keep it; never returned to the browser.
+    stored_settings.save(db, elevenlabs_api_key=key, elevenlabs_voice_id=preferred["id"])
     settings.elevenlabs_api_key = SecretStr(key)
     settings.elevenlabs_voice_id = preferred["id"]
     return {"connected": True, "voice_id": preferred["id"], "voice_name": preferred["name"]}

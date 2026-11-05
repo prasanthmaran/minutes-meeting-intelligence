@@ -9,6 +9,7 @@ from .ai import Provider, provider_error
 from .db import Chunk, Meeting, uid
 from .intelligence import demo_notes, source, validate_notes
 from .schemas import Notes
+from .stored_settings import Refresher
 from .transcripts import chunk_turns
 
 log = logging.getLogger(__name__)
@@ -79,9 +80,15 @@ class Worker:
         self.factory, self.settings = factory, settings
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True, name="meeting-ingestion")
+        # Keys saved in another process (dev or production) apply here within ~3 s.
+        self.refresher = Refresher(settings, factory)
+        self.ticks = 0
 
     def run(self):
         while not self.stop.is_set():
+            if self.ticks % 3 == 0:
+                self.refresher.check()
+            self.ticks += 1
             try:
                 with self.factory() as db:
                     meeting_id = db.scalar(

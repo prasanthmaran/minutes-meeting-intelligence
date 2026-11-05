@@ -17,6 +17,7 @@ from pydantic import BaseModel, SecretStr, Field
 from .transcripts import parse_transcript
 from .worker import Worker
 from .hosting import configure_hosting
+from . import stored_settings
 from .voice import local_request, router as voice_router
 from .live_voice import router as live_voice_router
 
@@ -29,6 +30,8 @@ settings = get_settings()
 async def lifespan(app):
     if engine.dialect.name == "sqlite":
         Base.metadata.create_all(engine)
+    # Keys saved from Settings survive restarts (encrypted in the database).
+    stored_settings.load(settings, SessionLocal)
     if settings.ai_mode != "demo":
         Provider(settings)  # fail fast on missing key; never silently switch providers
     with SessionLocal() as db:
@@ -291,7 +294,8 @@ def connect_anthropic(body: AIConnection, request: Request, db: Session = Depend
     except Exception as exc:
         log.warning("ai_connection_failed error_type=%s", type(exc).__name__)
         raise HTTPException(502, provider_error(exc)) from exc
-    # Shared settings object is also used by the ingestion worker. Never persist or return the key.
+    # Saved encrypted so restarts keep it; never returned to the browser.
+    stored_settings.save(db, anthropic_api_key=key, ai_mode="anthropic")
     settings.anthropic_api_key = SecretStr(key)
     settings.ai_mode = "anthropic"
     return {"mode": "anthropic", "model": settings.anthropic_model}
@@ -338,6 +342,11 @@ def connection_settings():
 def disconnect_anthropic(db: Session = Depends(get_db)):
     ensure_idle(db)
     # Session-only removal: a key in .env is read again on the next backend restart.
+    # An empty saved value records the removal, so a .env key does not return on restart.
+    removal = {"anthropic_api_key": ""}
+    if settings.ai_mode == "anthropic":
+        removal["ai_mode"] = "demo"
+    stored_settings.save(db, **removal)
     settings.anthropic_api_key = SecretStr("")
     if settings.ai_mode == "anthropic":
         settings.ai_mode = "demo"
@@ -345,7 +354,8 @@ def disconnect_anthropic(db: Session = Depends(get_db)):
 
 
 @app.delete("/api/settings/elevenlabs", dependencies=[Depends(local_request)])
-def disconnect_elevenlabs():
+def disconnect_elevenlabs(db: Session = Depends(get_db)):
+    stored_settings.save(db, elevenlabs_api_key="")
     settings.elevenlabs_api_key = SecretStr("")
     return {"connected": False}
 
