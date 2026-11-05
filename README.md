@@ -165,3 +165,5 @@ These show the real application in demo mode.
 ![Welcome screen](docs/screenshots/welcome.jpg)
 
 Submission readiness and remaining work: [submission checklist](docs/submission-checklist.md).
+
+Live Claude verification: four sample checks passed (owner/deadline, follow-up, unsupported budget, proposed versus approved metric). See [the recorded evaluation](docs/evaluations/claude-core-2026-11-05.json) for actual responses and scope.

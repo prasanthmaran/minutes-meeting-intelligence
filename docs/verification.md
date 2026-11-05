@@ -29,4 +29,17 @@ https://github.com/prasanthmaran/minutes-meeting-intelligence/actions/runs/41821
 
 ## Anthropic integration
 
-Added a session-only Claude key-entry dialog with a short live connection check before activation. Deterministic tests cover the structured Anthropic HTTP request, key rejection guards, key non-disclosure, ingestion and answers without embedding calls, and frontend success/failure states. Live Claude answers remain unverified until a valid replacement key is entered locally; the credential pasted into chat was not used.
+Added a session-only Claude key-entry dialog with a short live connection check before activation. Deterministic tests cover the structured Anthropic HTTP request, key rejection guards, key non-disclosure, ingestion and answers without embedding calls, and frontend success/failure states. Live Claude answers were verified on November 5, 2026 after the user connected through the local app. Four sample checks passed: review owner/deadline, a contextual follow-up, abstaining on an unsupported approved salary budget, and distinguishing a proposed metric from an approved one. All returned citation IDs belonged to the selected meeting. The previously pasted chat credential was not used by the agent.
+
+## Live Claude core evaluation — November 5, 2026
+
+Provider: Anthropic, `claude-haiku-4-5-20251001`. The sample meeting was ready in Anthropic mode with generated summaries, decisions, action owners/deadlines, and unresolved questions.
+
+| Check | Observed | Result |
+|---|---|---|
+| Owner / deadline | Sam, November 10 | Pass |
+| Follow-up | A critical security issue stops launch until fixed | Pass |
+| Unsupported budget | No dollar figure invented; marked insufficient evidence | Pass |
+| Proposal vs approval | Pilot metric remains proposed, awaiting product approval | Pass |
+
+Evidence: [recorded answers and citation checks](evaluations/claude-core-2026-11-05.json). This covers one sample; multilingual accuracy, prompt-injection resistance, and broad production reliability have not been established by this check.

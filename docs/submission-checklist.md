@@ -15,8 +15,8 @@ Status checked on November 5, 2026. The prototype is implemented; a live provide
 ## Required before submission
 
 - [ ] Revoke the credential shared in chat and create a replacement Anthropic Console API key with usable credits/model access.
-- [ ] In the local app, click **Connect Claude**, enter the replacement key, and connect. Never send the replacement key in chat or commit it to Git.
-- [ ] Wait for the selected meeting to reprocess to **ready**; ask about decisions, the security review owner, and unresolved topics.
+- [x] In the local app, click **Connect Claude**, enter the replacement key, and connect. Never send the replacement key in chat or commit it to Git.
+- [x] Wait for the selected meeting to reprocess to **ready**; ask about decisions, the security review owner, and unresolved topics.
 - [ ] Complete `evaluation.md` against the real provider, including follow-ups, missing information, proposed versus confirmed decisions, and evidence inspection. Record actual results.
 - [ ] Resolve or document the GitHub Actions startup failure. Latest checked run: https://github.com/prasanthmaran/minutes-meeting-intelligence/actions/runs/41867494286 . GitHub reports zero jobs and supplies no job logs through the API. Local checks are not a passing CI run.
 - [ ] Capture screenshots of real AI answers and generated meeting notes. Current screenshots demonstrate demo mode and connection setup.
@@ -27,3 +27,5 @@ Status checked on November 5, 2026. The prototype is implemented; a live provide
 ## Optional extensions, not assignment blockers
 
 Automatic meeting attendance, calendar integration, voice transcription, cross-meeting search, streaming chat, public deployment, authentication and multi-user support. Docker is optional and is not being used for the local prototype.
+
+Live core verification: four sample checks passed on November 5; see `evaluations/claude-core-2026-11-05.json`. Complete the remaining quality cases before claiming broader coverage.

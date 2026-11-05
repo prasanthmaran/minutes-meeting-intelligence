@@ -1,0 +1,146 @@
+{
+  "checked_at": "2026-11-05T15:28:23.367352+00:00",
+  "provider": {
+    "status": "ok",
+    "mode": "anthropic",
+    "model": "claude-haiku-4-5-20251001"
+  },
+  "meeting": "Atlas beta launch",
+  "meeting_id": "633d098c-5802-4044-9d5b-0d6aaa2b6c65",
+  "notes": {
+    "summary": [
+      {
+        "text": "Atlas beta launch review meeting to decide on scope, owners, and launch gate. Team decided to launch onboarding flow to ten pilot customers on November 12 with analytics disabled behind a feature flag rather than delaying the entire launch. Analytics has a data freshness bug requiring further investigation. Security review is a launch gate requirement with no critical issues permitted.",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2",
+          "da1e85be-e51a-44fb-b017-ecba02ef52f7"
+        ]
+      }
+    ],
+    "decisions": [
+      {
+        "text": "Launch onboarding flow to ten pilot customers on November 12 with analytics disabled behind a feature flag, not delaying the whole launch.",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ]
+      },
+      {
+        "text": "Pilot customers will be clearly informed that analytics is not included in the initial launch and is coming later.",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ]
+      },
+      {
+        "text": "Security review is a launch gate. No critical security issues are permitted to proceed with launch.",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ]
+      },
+      {
+        "text": "Progress review scheduled for November 11.",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "text": "Configure the analytics feature flag and verify it in staging",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ],
+        "owner": "Leo",
+        "deadline": "November 8"
+      },
+      {
+        "text": "Write pilot customer announcement explaining that analytics is coming later",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ],
+        "owner": "Priya",
+        "deadline": "November 9"
+      },
+      {
+        "text": "Complete security review and report any blockers",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ],
+        "owner": "Sam",
+        "deadline": "November 10"
+      }
+    ],
+    "questions": [
+      {
+        "text": "What is the estimate for fixing the data freshness bug in analytics that may require a queue change?",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ]
+      },
+      {
+        "text": "Do we have budget for an additional analytics engineer?",
+        "source_ids": [
+          "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+        ]
+      },
+      {
+        "text": "What is the success metric for the pilot? (Proposed: eight of ten customers completing onboarding within the first week, pending product approval)",
+        "source_ids": [
+          "da1e85be-e51a-44fb-b017-ecba02ef52f7"
+        ]
+      }
+    ]
+  },
+  "checks": [
+    {
+      "question": "Who owns the security review and when is it due?",
+      "answer": "Sam owns the security review and it is due by November 10. Sam committed to completing the security review by November 10 and reporting any blockers. No critical security issues is also established as a launch gate for the Atlas beta launch.",
+      "insufficient_evidence": false,
+      "citation_ids": [
+        "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+      ],
+      "citations_valid": true,
+      "expected_behavior": "Sam owns the review; deadline November 10.",
+      "review_result": "pass"
+    },
+    {
+      "question": "What happens to the launch if that review finds a critical issue?",
+      "answer": "If the security review finds a critical issue, the launch is stopped until the issue is fixed. This was established as an explicit launch gate decision during the meeting.",
+      "insufficient_evidence": false,
+      "citation_ids": [
+        "0f0b7041-9227-4a37-a50a-8dc17c4c66d2"
+      ],
+      "citations_valid": true,
+      "expected_behavior": "Follow-up resolves security review; critical issue stops launch until fixed.",
+      "review_result": "pass"
+    },
+    {
+      "question": "What exact salary budget in dollars was approved for hiring an additional analytics engineer?",
+      "answer": "The evidence does not contain an exact salary budget in dollars approved for hiring an additional analytics engineer. Priya asked if there is budget for an additional analytics engineer, but Maya stated that the hiring budget is unresolved and requires finance input before any commitment can be made. No specific dollar amount was approved.",
+      "insufficient_evidence": true,
+      "citation_ids": [
+        "0f0b7041-9227-4a37-a50a-8dc17c4c66d2",
+        "da1e85be-e51a-44fb-b017-ecba02ef52f7"
+      ],
+      "citations_valid": true,
+      "expected_behavior": "No invented dollar amount; budget is unresolved and insufficient_evidence=true.",
+      "review_result": "pass"
+    },
+    {
+      "question": "Was the pilot success metric approved or only proposed?",
+      "answer": "The pilot success metric was only proposed, not approved. Maya stated: \"Let's target eight of the ten customers completing onboarding within the first week. This is a proposed metric; we still need product approval.\" Maya also confirmed in her closing remarks that the proposed success metric will be reviewed in the next meeting.",
+      "insufficient_evidence": false,
+      "citation_ids": [
+        "da1e85be-e51a-44fb-b017-ecba02ef52f7"
+      ],
+      "citations_valid": true,
+      "expected_behavior": "Eight-of-ten success metric is proposed and awaits product approval.",
+      "review_result": "pass"
+    }
+  ],
+  "review": {
+    "reviewer": "Codex",
+    "passed": 4,
+    "total": 4,
+    "scope": "One supplied sample transcript; inspected answer facts and source IDs. This is not an exhaustive model-quality benchmark."
+  }
+}
