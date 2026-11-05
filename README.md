@@ -160,7 +160,7 @@ First: authenticated ownership, live quality evaluation, temporal decision recon
 
 These show the real application in demo mode.
 
-![Meeting workspace](docs/screenshots/workspace.jpg)
+![Meeting workspace — blue theme](docs/screenshots/blue-theme.jpg)
 
 ![Welcome screen](docs/screenshots/welcome.jpg)
 
