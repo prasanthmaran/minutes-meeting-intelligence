@@ -16,8 +16,6 @@ export function VoiceAssistant({
   lastAnswer,
   sending,
   onConversationActive,
-  onConversationTurn,
-  onAISettings,
   meetingTitle,
   onAIStatus,
 }: {
@@ -261,32 +259,17 @@ export function VoiceAssistant({
               <strong>{meetingTitle ?? "Selected meeting"}</strong>
             </div>
             <div className="agent-window-body">
-              {!aiEnabled && (
-                <div className="agent-setup-warning">
-                  <p>Connect the AI that answers your questions before starting.</p>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setAgentOpen(false);
-                      onAISettings();
-                    }}
-                  >
-                    Connect Claude
-                  </Button>
-                </div>
-              )}
               <VoiceConversation
                 meetingId={meetingId}
-                disabled={!ready || !aiEnabled || sending || recording || working}
+                disabled={!ready || recording || working}
                 onActive={active => {
                   if (active) player.current?.pause();
                   setConversationActive(active);
                   onConversationActive(active);
                 }}
-                onTurn={onConversationTurn}
               />
               <p className="agent-sources-note">
-                Answers and evidence citations are saved in the meeting chat.
+                Live voice is separate from text chat. Evidence appears inside this window.
               </p>
             </div>
           </section>
@@ -303,14 +286,6 @@ export function VoiceAssistant({
             </>
           ) : (
             <>
-              {!aiEnabled && (
-                <p className="voice-warning">
-                  Connect Claude or OpenAI in Settings to answer your questions first.
-                  <button className="text-button" onClick={onAISettings}>
-                    Open AI settings
-                  </button>
-                </p>
-              )}
               <div className="agent-launch">
                 <div className="agent-launch-icon">
                   <AudioLines size={25} />

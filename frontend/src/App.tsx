@@ -24,8 +24,9 @@ import { VoiceAssistant } from "./components/VoiceAssistant";
 import { Sidebar } from "./components/Sidebar";
 import { MeetingLibrary } from "./components/MeetingLibrary";
 import { AISettings } from "./components/AISettings";
+import { EmptyState } from "./components/EmptyState";
 import { Button } from "./components/ui/button";
-import { api, clock } from "./api";
+import { api, ApiError, clock } from "./api";
 import { sample } from "./sample";
 import type { Detail, Meeting, Message, Note, Source } from "./types";
 
@@ -44,6 +45,9 @@ export default function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selected, setSelected] = useState<string | null>(meetingFromHash);
   const [detail, setDetail] = useState<Detail | null>(null);
+  // "missing" = the meeting no longer exists (deleted, or an old link); otherwise a load error.
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailAttempt, setDetailAttempt] = useState(0);
   const [messages, setMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState("");
   const [aiSettings, setAISettings] = useState(false);
@@ -78,6 +82,7 @@ export default function App() {
 
   function openMeeting(id: string | null) {
     setSelected(id);
+    setDetailError(null);
     setEvidence(null);
     setError("");
     window.location.hash = id ? `/meetings/${id}` : "/meetings";
@@ -119,6 +124,7 @@ export default function App() {
     }
     let active = true;
     setDetail(null);
+    setDetailError(null);
     setMessages([]);
     setEvidence(null);
     setTab("overview");
@@ -135,12 +141,16 @@ export default function App() {
         }
       })
       .catch(e => {
-        if (active) setError(e.message);
+        if (!active) return;
+        if (e instanceof ApiError && e.status === 404) {
+          setDetailError("missing");
+          loadList().catch(() => {});
+        } else setDetailError((e as Error).message);
       });
     return () => {
       active = false;
     };
-  }, [selected]);
+  }, [selected, detailAttempt]);
   useEffect(() => {
     if (!meetings.some(m => ["queued", "processing"].includes(m.status))) return;
     const interval = setInterval(async () => {
@@ -152,7 +162,10 @@ export default function App() {
           if (current.current === id) setDetail(result);
         }
       } catch (e) {
-        setError((e as Error).message);
+        if (e instanceof ApiError && e.status === 404) {
+          setDetail(null);
+          setDetailError("missing");
+        } else setError((e as Error).message);
       }
     }, 1500);
     return () => clearInterval(interval);
@@ -167,18 +180,35 @@ export default function App() {
     return () => previous?.focus();
   }, [modal]);
 
-  async function upload(file: File) {
+  async function upload(input: File | File[]) {
+    const files = Array.isArray(input) ? input : [input];
+    if (!files.length) return;
     setUploading(true);
     setError("");
-    const body = new FormData();
-    body.append("file", file);
+    const imported: Meeting[] = [];
+    const failed: string[] = [];
     try {
-      const meeting = await api<Meeting>("/meetings", { method: "POST", body });
-      await loadList();
-      openMeeting(meeting.id);
-      setModal(false);
-    } catch (e) {
-      setError((e as Error).message);
+      // One at a time: the API validates and queues each transcript independently.
+      for (const file of files) {
+        const body = new FormData();
+        body.append("file", file);
+        try {
+          imported.push(await api<Meeting>("/meetings", { method: "POST", body }));
+        } catch (e) {
+          failed.push(
+            files.length > 1 ? `${file.name}: ${(e as Error).message}` : (e as Error).message
+          );
+        }
+      }
+      await loadList().catch(() => {});
+      if (imported.length) setModal(false);
+      if (imported.length === 1 && files.length === 1) openMeeting(imported[0].id);
+      else if (imported.length) openMeeting(null);
+      if (failed.length)
+        setError(
+          (files.length > 1 ? `Imported ${imported.length} of ${files.length} transcripts. ` : "") +
+            failed.join(" · ")
+        );
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -348,6 +378,15 @@ export default function App() {
               </>
             )}
           </div>
+          <div className="topbar-account">
+            <div className="topbar-profile" title="Personal workspace">
+              <span className="avatar">P</span>
+              <div className="topbar-profile-label">
+                <strong>Personal workspace</strong>
+                <small>Meeting intelligence</small>
+              </div>
+            </div>
+          </div>
         </header>
         {error && (
           <div className="error-banner" role="alert">
@@ -368,8 +407,43 @@ export default function App() {
               upload(new File([sample], "Atlas beta launch.txt", { type: "text/plain" }))
             }
           />
+        ) : detailError === "missing" ? (
+          <EmptyState
+            art="missing"
+            role="status"
+            title="This meeting isn’t available"
+            actions={
+              <>
+                <Button onClick={() => openMeeting(null)}>
+                  <ArrowLeft size={16} /> Back to meetings
+                </Button>
+                <Button variant="outline" onClick={() => setModal(true)}>
+                  <Upload size={16} /> Import meetings
+                </Button>
+              </>
+            }
+          >
+            It may have been deleted, or the link is from an earlier workspace. Your other meetings
+            are still in the library.
+          </EmptyState>
+        ) : detailError ? (
+          <EmptyState
+            art="error"
+            role="alert"
+            title="We couldn’t load this meeting"
+            actions={
+              <>
+                <Button onClick={() => setDetailAttempt(n => n + 1)}>Try again</Button>
+                <Button variant="outline" onClick={() => openMeeting(null)}>
+                  <ArrowLeft size={16} /> Back to meetings
+                </Button>
+              </>
+            }
+          >
+            {detailError}
+          </EmptyState>
         ) : !detail ? (
-          <div className="loading">
+          <div className="loading" role="status">
             <Loader2 className="spin" /> Loading meeting…
           </div>
         ) : (
@@ -758,6 +832,8 @@ export default function App() {
             setAISettings(false);
             if (selected) reprocess();
           }}
+          onDisconnected={setMode}
+          onVoiceDisconnected={() => setVoiceSettingsVersion(v => v + 1)}
         />
       )}
       {modal && (
@@ -801,7 +877,7 @@ export default function App() {
               <Upload size={25} />
             </div>
             <h2 id="upload-title">Bring your meeting to Minutes.</h2>
-            <p>Upload a timestamped transcript. We’ll take it from here.</p>
+            <p>Import one or more timestamped transcripts. We’ll take it from here.</p>
             <button
               className="dropzone"
               disabled={uploading}
@@ -809,23 +885,24 @@ export default function App() {
               onDragOver={e => e.preventDefault()}
               onDrop={e => {
                 e.preventDefault();
-                if (!uploading && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+                if (!uploading && e.dataTransfer.files.length) upload([...e.dataTransfer.files]);
               }}
             >
               {uploading ? <Loader2 className="spin" /> : <FileText size={30} />}
               <strong>
-                {uploading ? "Uploading transcript…" : "Choose a transcript or drop it here"}
+                {uploading ? "Importing transcripts…" : "Choose transcripts or drop them here"}
               </strong>
-              <small>UTF-8 .txt · up to 250 KB / 60,000 characters</small>
+              <small>UTF-8 .txt files · up to 250 KB / 60,000 characters each</small>
             </button>
             <input
               ref={fileRef}
               type="file"
               accept=".txt,text/plain"
+              multiple
               className="sr-only"
               tabIndex={-1}
               onChange={e => {
-                if (e.target.files?.[0]) upload(e.target.files[0]);
+                if (e.target.files?.length) upload([...e.target.files]);
               }}
             />
             <div className="format-example">

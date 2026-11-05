@@ -1,8 +1,10 @@
-.PHONY: setup backend frontend test build
+.PHONY: setup migrate backend frontend test build
 setup:
 	cd backend && uv sync --frozen
 	cd frontend && npm ci
-backend:
+migrate:
+	cd backend && uv run python -m app.migrate
+backend: migrate
 	cd backend && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 frontend:
 	cd frontend && npm run dev

@@ -61,17 +61,40 @@ class Message(Base):
     citations: Mapped[list] = mapped_column(JSON, default=list)
 
 
+def normalize_url(url: str) -> str:
+    """Accept Supabase/Neon style postgres:// URLs; this project ships the psycopg 3 driver."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
 def make_engine(url: str):
-    engine = create_engine(
-        url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {}
-    )
+    url = normalize_url(url)
     if url.startswith("sqlite"):
+        engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 5})
 
         @event.listens_for(engine, "connect")
-        def enable_foreign_keys(connection, _):
+        def configure_sqlite(connection, _):
             connection.execute("PRAGMA foreign_keys=ON")
+            # WAL lets reads continue during a write (API requests + ingestion worker,
+            # or dev and hosted processes on one file). Writers wait instead of failing.
+            if ":memory:" not in url:
+                connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=5000")
+            connection.execute("PRAGMA synchronous=NORMAL")
 
-    return engine
+        return engine
+    # Hosted Postgres (e.g. Supabase pooler) closes idle connections: check before use.
+    # prepare_threshold=None keeps psycopg compatible with PgBouncer transaction pooling.
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=5,
+        connect_args={"prepare_threshold": None, "connect_timeout": 10},
+    )
 
 
 engine = make_engine(get_settings().database_url)

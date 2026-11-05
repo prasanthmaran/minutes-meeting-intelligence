@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ArrowRight, AudioLines, FileText, Search, Upload } from "lucide-react";
+import { ArrowRight, FileText, Search, Upload } from "lucide-react";
 import { Button } from "./ui/button";
+import { EmptyState } from "./EmptyState";
 import { clock } from "../api";
 import type { Meeting } from "../types";
 
@@ -72,22 +73,23 @@ export function MeetingLibrary({
           Loading meetings…
         </div>
       ) : meetings.length === 0 ? (
-        <div className="library-empty">
-          <div className="library-empty-icon">
-            <AudioLines size={30} />
-          </div>
-          <h2>Your next conversation starts here.</h2>
-          <p>
-            Upload a transcript to get a meeting summary, decisions, action items, and cited
-            answers.
-          </p>
-          <div>
-            <Button onClick={onUpload}>Upload your first transcript</Button>
-            <Button variant="outline" onClick={onSample} disabled={uploading}>
-              Explore a sample <ArrowRight size={16} />
-            </Button>
-          </div>
-        </div>
+        <EmptyState
+          art="library"
+          title="No meetings yet"
+          actions={
+            <>
+              <Button onClick={onUpload} disabled={uploading}>
+                <Upload size={16} /> Import meetings
+              </Button>
+              <Button variant="outline" onClick={onSample} disabled={uploading}>
+                Explore a sample <ArrowRight size={16} />
+              </Button>
+            </>
+          }
+        >
+          Import one or more timestamped .txt transcripts to get summaries, decisions, action items,
+          and answers with cited evidence.
+        </EmptyState>
       ) : (
         <div className="meeting-table-wrap">
           <table className="meeting-table">

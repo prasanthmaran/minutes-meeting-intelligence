@@ -59,3 +59,14 @@ Added an automatic listening → transcription → cited answer → speech → l
 Live speech generation check: the connected ElevenLabs account returned a valid MP3 for the supplied Atlas sample answer. The test did not activate the microphone or use private meeting text. Claude was in demo mode during this check, so a complete spoken-question-to-answer cycle was not claimed.
 
 Conversation-agent window: added a dedicated meeting-scoped modal with a full session transcript, setup action, focus handling, and safe close/Escape cleanup. Frontend tests cover modal discovery/closing and the missing-AI setup path. No new backend restart was needed for this UI update.
+
+
+## Live voice upgrade — 5 November 2026
+
+- Separate ElevenLabs Agents WebRTC session; text chatbot implementation retained.
+- 40 backend tests pass, including private token creation/reuse, secret masking, origin checks, ready-meeting checks and meeting isolation.
+- 24 frontend tests pass, including SDK connection, meeting-scoped client tool, mute, unmount cleanup, delayed connection cancellation and missing permissions.
+- TypeScript and Vite production build pass. SDK is lazy-loaded; its separate bundle still triggers Vite's size advisory.
+- Restarted backend; live sample evidence route returned two chunks and complete_transcript=true.
+- Hosted agent creation, actual microphone audio, automatic spoken interruption, and latency are NOT live-verified yet: ElevenLabs needs reconnecting after the backend restart. Mocked SDK tests do not establish audio quality or response speed.
+- Live voice uses hosted freeform answers with retrieved evidence; structured citation validation remains a text-chat feature. See README for trade-offs and provider retention.

@@ -29,7 +29,8 @@ it("shows the empty library and honestly labels demo mode", async () => {
   render(<App />);
   expect(await screen.findByRole("button", { name: /Explore a sample/ })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  expect(await screen.findByText("Demo · no API key")).toBeInTheDocument();
+  expect(await screen.findByText("Not connected")).toBeInTheDocument();
+  expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Explore a sample/ })).toBeEnabled();
 });
 
@@ -161,6 +162,77 @@ it("keeps Claude status in Settings instead of the main header", async () => {
   await screen.findByRole("button", { name: /Explore a sample/ });
   expect(screen.queryByText("Claude enabled")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  expect(await screen.findByRole("dialog", { name: "AI settings" })).toBeInTheDocument();
-  expect(screen.getByText("Claude enabled")).toBeInTheDocument();
+  expect(await screen.findByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+  expect(screen.getByText("Connected")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Replace key" })).toBeInTheDocument();
+});
+
+it("shows an illustrated empty library with an import action", async () => {
+  render(<App />);
+  expect(await screen.findByRole("heading", { name: "No meetings yet" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Import meetings" }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(document.querySelector('input[type="file"]')).toHaveAttribute("multiple");
+});
+
+it("replaces an endless spinner with a recoverable state for a deleted meeting link", async () => {
+  window.location.hash = "#/meetings/0b1c2d3e-0000-4000-8000-000000000000";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url.includes("/meetings/0b1c")
+        ? { ok: false, status: 404, json: async () => ({ detail: "Meeting not found." }) }
+        : {
+            ok: true,
+            status: 200,
+            json: async () => (url.endsWith("/health") ? { mode: "demo" } : []),
+          }
+    )
+  );
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", { name: "This meeting isn’t available" })
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/Loading meeting/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Back to meetings/ }));
+  expect(await screen.findByRole("heading", { name: "No meetings yet" })).toBeInTheDocument();
+});
+
+it("imports several transcripts and reports the ones that fail", async () => {
+  let created = 0;
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const file = (init.body as FormData).get("file") as File;
+      if (file.name === "bad.txt")
+        return {
+          ok: false,
+          status: 422,
+          json: async () => ({ detail: "Line 1: expected [MM:SS] Speaker: text" }),
+        };
+      created += 1;
+      return {
+        ok: true,
+        status: 202,
+        json: async () => ({ id: `m${created}`, title: file.name, status: "queued" }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith("/health") ? { mode: "demo" } : []),
+    };
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Import meetings" }));
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  const files = ["a.txt", "bad.txt", "c.txt"].map(
+    n => new File(["[00:00] A: hi"], n, { type: "text/plain" })
+  );
+  fireEvent.change(input, { target: { files } });
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Imported 2 of 3 transcripts. bad.txt: Line 1"
+  );
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(3);
 });

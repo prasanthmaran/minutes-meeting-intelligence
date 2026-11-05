@@ -1,169 +1,169 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Mic, PhoneOff, Square, Volume2 } from "lucide-react";
+import { AudioLines, Mic, MicOff, PhoneOff, Volume2 } from "lucide-react";
+import type { Conversation } from "@elevenlabs/client";
 import { api } from "../api";
 import { Button } from "./ui/button";
-import { Conversation, type ConversationState } from "../voice/conversation";
-import { BrowserMicrophone } from "../voice/browserAudio";
-import type { Message } from "../types";
+import type { Source } from "../types";
 
-const labels: Record<ConversationState, string> = {
+type State = "idle" | "connecting" | "listening" | "speaking" | "stopping";
+const labels: Record<State, string> = {
   idle: "Ready to talk",
-  connecting: "Connecting microphone…",
+  connecting: "Connecting live voice…",
   listening: "Listening…",
-  transcribing: "Understanding your question…",
-  thinking: "Finding evidence…",
-  preparing: "Preparing the voice…",
-  speaking: "Speaking…",
+  speaking: "Speaking — you can interrupt",
+  stopping: "Ending conversation…",
 };
 export function VoiceConversation({
   meetingId,
   disabled,
   onActive,
-  onTurn,
 }: {
   meetingId: string;
   disabled: boolean;
   onActive: (active: boolean) => void;
-  onTurn: (question: string, answer: Message) => void;
 }) {
-  const [state, setState] = useState<ConversationState>("idle");
-  const [transcript, setTranscript] = useState<{ role: string; text: string }[]>([]);
+  const [state, setState] = useState<State>("idle");
+  const [muted, setMuted] = useState(false);
+  const [error, setError] = useState("");
+  const [transcript, setTranscript] = useState<{ id: number; role: string; text: string }[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
+  const session = useRef<Conversation | null>(null);
+  const pending = useRef(false);
+  const controller = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const callback = useRef(onActive);
+  callback.current = onActive;
   const logBottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (transcript.length)
-      logBottom.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (transcript.length) logBottom.current?.scrollIntoView?.({ block: "nearest" });
   }, [transcript]);
-  const [error, setError] = useState("");
-  const engine = useRef<Conversation | null>(null);
-  const mounted = useRef(true);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const url = useRef<string | null>(null);
-  const callbacks = useRef({ onActive, onTurn });
-  callbacks.current = { onActive, onTurn };
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      engine.current?.stop();
-      callbacks.current.onActive(false);
+      controller.current?.abort();
+      void session.current?.endSession();
+      session.current = null;
+      callback.current(false);
     };
   }, []);
-  function releasePlayer() {
-    audio.current?.pause();
-    audio.current = null;
-    if (url.current) URL.revokeObjectURL(url.current);
-    url.current = null;
+  function update(next: State) {
+    if (mounted.current) {
+      setState(next);
+      callback.current(next !== "idle");
+    }
+  }
+  async function stop() {
+    controller.current?.abort();
+    update("stopping");
+    const current = session.current;
+    session.current = null;
+    try {
+      await current?.endSession();
+    } finally {
+      if (!pending.current) update("idle");
+    }
   }
   async function start() {
-    if (engine.current) return;
+    if (pending.current || session.current) return;
+    pending.current = true;
+    const abort = new AbortController();
+    controller.current = abort;
+    const valid = () => mounted.current && !abort.signal.aborted;
     setError("");
     setTranscript([]);
-    const mic = new BrowserMicrophone();
-    const conversation = new Conversation(
-      {
-        open: signal => mic.open(signal),
-        capture: signal => mic.capture(signal),
-        transcribe: async (blob, signal) => {
-          const body = new FormData();
-          body.append("file", blob, "question.audio");
-          const result = await api<{ text: string }>(`/meetings/${meetingId}/voice/transcribe`, {
-            method: "POST",
-            headers: { "X-Local-Settings": "1" },
-            body,
-            signal,
-          });
-          return result.text;
+    setSources([]);
+    setMuted(false);
+    update("connecting");
+    try {
+      const { token } = await api<{ token: string }>(`/meetings/${meetingId}/voice/session`, {
+        method: "POST",
+        headers: { "X-Local-Settings": "1" },
+        signal: abort.signal,
+      });
+      if (!valid()) return;
+      const { Conversation: LiveConversation } = await import("@elevenlabs/client");
+      if (!valid()) return;
+      const connected = await LiveConversation.startSession({
+        conversationToken: token,
+        connectionType: "webrtc",
+        textOnly: false,
+        onModeChange: ({ mode }) => {
+          if (valid()) update(mode);
         },
-        answer: async (question, signal) => {
-          const result = await api<Message>(`/meetings/${meetingId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: question }),
-            signal,
-          });
-          if (!signal.aborted && mounted.current) callbacks.current.onTurn(question, result);
-          return result;
+        onMessage: ({ message, role, event_id }) => {
+          if (valid())
+            setTranscript(rows => {
+              const line = {
+                id: event_id,
+                role: role === "user" ? "You" : "Minutes",
+                text: message,
+              };
+              const existing = rows.findIndex(r => r.id === event_id && r.role === line.role);
+              return existing < 0
+                ? [...rows, line]
+                : rows.map((r, i) => (i === existing ? line : r));
+            });
         },
-        speech: async (id, signal) => {
-          const response = await fetch(`/api/meetings/${meetingId}/messages/${id}/speech`, {
-            method: "POST",
-            headers: { "X-Local-Settings": "1" },
-            signal,
-          });
-          if (!response.ok) {
-            const body = await response.json().catch(() => null);
-            throw new Error(body?.detail ?? "Speech generation failed.");
+        onDisconnect: details => {
+          if (!valid()) return;
+          abort.abort();
+          session.current = null;
+          update("idle");
+          if (details.reason === "error")
+            setError("Live voice disconnected. Check your connection and start again.");
+        },
+        onError: () => {
+          if (valid()) {
+            setError(
+              "Live voice encountered a connection or audio error. Check microphone permission and ElevenLabs Agents access."
+            );
+            void stop();
           }
-          return response.blob();
         },
-        play: (blob, signal) =>
-          new Promise<void>((resolve, reject) => {
-            if (signal.aborted) {
-              reject(new DOMException("Stopped", "AbortError"));
-              return;
-            }
-            releasePlayer();
-            url.current = URL.createObjectURL(blob);
-            const player = new Audio(url.current);
-            audio.current = player;
-            let settled = false;
-            const finish = (error?: Error) => {
-              if (settled) return;
-              settled = true;
-              signal.removeEventListener("abort", cancel);
-              player.onended = null;
-              player.onerror = null;
-              releasePlayer();
-              error ? reject(error) : resolve();
-            };
-            const cancel = () => finish(new DOMException("Stopped", "AbortError"));
-            player.onended = () => finish();
-            player.onerror = () =>
-              finish(new Error("Audio playback failed. Check your output device and start again."));
-            signal.addEventListener("abort", cancel, { once: true });
-            player
-              .play()
-              .catch(() =>
-                finish(
-                  new Error(
-                    "Browser blocked speech playback. Allow sound for this site and start again."
-                  )
-                )
+        clientTools: {
+          meeting_evidence: async ({ question }: { question: string }) => {
+            if (!valid()) return JSON.stringify({ error: "Session ended. Do not answer." });
+            try {
+              const result = await api<{ sources: Source[]; complete_transcript: boolean }>(
+                `/meetings/${meetingId}/voice/evidence`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "X-Local-Settings": "1" },
+                  body: JSON.stringify({ text: question }),
+                  signal: abort.signal,
+                }
               );
-          }),
-        close: () => {
-          mic.close();
-          releasePlayer();
+              if (!valid()) return JSON.stringify({ error: "Session ended. Do not answer." });
+              setSources(result.sources);
+              return JSON.stringify(result);
+            } catch {
+              return JSON.stringify({
+                error:
+                  "Meeting evidence unavailable. Tell the user you cannot verify the answer. Do not guess.",
+              });
+            }
+          },
         },
-      },
-      next => {
-        if (mounted.current) {
-          setState(next);
-          callbacks.current.onActive(next !== "idle");
-        }
-      },
-      text => {
-        if (mounted.current) {
-          setTranscript(t => [...t, { role: "You", text }]);
-        }
-      },
-      text => {
-        if (mounted.current) {
-          setTranscript(t => [...t, { role: "Minutes", text }]);
-        }
-      },
-      message => {
-        if (mounted.current) setError(message);
+      });
+      if (!valid()) {
+        await connected.endSession();
+        return;
       }
-    );
-    engine.current = conversation;
-    await conversation.start();
-    if (engine.current === conversation) engine.current = null;
+      session.current = connected;
+      update("listening");
+    } catch (err) {
+      if (valid())
+        setError(
+          (err as Error).name === "NotAllowedError"
+            ? "Allow microphone access and try again."
+            : (err as Error).message || "Could not start live voice."
+        );
+    } finally {
+      pending.current = false;
+      if (!session.current) update("idle");
+    }
   }
-  const supported =
-    typeof window.AudioContext !== "undefined" &&
-    typeof window.MediaRecorder !== "undefined" &&
-    !!navigator.mediaDevices?.getUserMedia;
   const active = state !== "idle";
   return (
     <div className={`voice-conversation state-${state}`}>
@@ -179,35 +179,36 @@ export function VoiceConversation({
       <strong className="conversation-state" role="status">
         {labels[state]}
       </strong>
-      <p>Start once. Speak naturally, pause for an answer, and keep the conversation going.</p>
+      <p>
+        Speak naturally. Interrupt by speaking, and ask follow-up questions without pressing a
+        button.
+      </p>
       <div className="conversation-controls">
         {active ? (
           <>
             <Button
               variant="outline"
-              onClick={() => engine.current?.interrupt()}
-              disabled={state !== "speaking"}
+              disabled={!session.current}
+              onClick={() => {
+                session.current?.setMicMuted(!muted);
+                setMuted(!muted);
+              }}
             >
-              <Square size={15} />
-              Interrupt & speak
+              {muted ? <Mic size={16} /> : <MicOff size={16} />}
+              {muted ? "Unmute" : "Mute"}
             </Button>
-            <Button onClick={() => engine.current?.stop()}>
+            <Button onClick={() => void stop()} disabled={state === "stopping"}>
               <PhoneOff size={16} />
               End conversation
             </Button>
           </>
         ) : (
-          <Button onClick={start} disabled={disabled || !supported}>
+          <Button onClick={() => void start()} disabled={disabled}>
             <Mic size={17} />
             Start conversation
           </Button>
         )}
       </div>
-      {!supported && (
-        <p className="voice-warning">
-          Use Chrome, Edge, or Safari on localhost/HTTPS with microphone access.
-        </p>
-      )}
       <div
         className="agent-conversation-log"
         aria-label="Voice conversation transcript"
@@ -215,29 +216,44 @@ export function VoiceConversation({
       >
         {!transcript.length ? (
           <div className="agent-empty-transcript">
-            <span>YOUR CONVERSATION</span>
-            <p>Try “What did we decide?” or “Who owns the next step?”</p>
+            <span>LIVE VOICE · SEPARATE FROM CHAT</span>
+            <p>Try “Hi” or “What did we decide?”</p>
           </div>
         ) : (
-          transcript.map((item, i) => (
+          transcript.map((line, i) => (
             <article
               key={i}
-              className={item.role === "You" ? "agent-user-line" : "agent-assistant-line"}
+              className={line.role === "You" ? "agent-user-line" : "agent-assistant-line"}
             >
-              <b>{item.role}</b>
-              <p>{item.text}</p>
+              <b>{line.role}</b>
+              <p>{line.text}</p>
             </article>
           ))
         )}
         <div ref={logBottom} />
       </div>
+      {!!sources.length && (
+        <details className="manual-voice">
+          <summary>Evidence retrieved for the latest question ({sources.length})</summary>
+          {sources.map(s => (
+            <p key={s.id}>
+              <b>
+                {Math.floor(s.start / 60)}:{String(s.start % 60).padStart(2, "0")}
+              </b>{" "}
+              {s.text}
+            </p>
+          ))}
+        </details>
+      )}
       {error && (
         <p role="alert" className="voice-error">
           {error}
         </p>
       )}
       <small>
-        Microphone access stays on until End. Press Interrupt to stop playback and ask a follow-up.
+        Starting streams microphone audio and requested meeting evidence to ElevenLabs. Uses Agents
+        credits. End closes the microphone. Voice history stays in this window; provider retention
+        settings also apply.
       </small>
     </div>
   );

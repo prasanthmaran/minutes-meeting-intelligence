@@ -16,7 +16,9 @@ from .schemas import Question, Answer
 from pydantic import BaseModel, SecretStr, Field
 from .transcripts import parse_transcript
 from .worker import Worker
-from .voice import router as voice_router
+from .hosting import configure_hosting
+from .voice import local_request, router as voice_router
+from .live_voice import router as live_voice_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ async def lifespan(app):
 
 app = FastAPI(title="Minutes — Meeting Intelligence", version="0.1.0", lifespan=lifespan)
 app.include_router(voice_router)
+app.include_router(live_voice_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -272,10 +275,7 @@ def connect_anthropic(body: AIConnection, request: Request, db: Session = Depend
     origin = request.headers.get("origin")
     if origin and origin not in settings.cors_origins:
         raise HTTPException(403, "Unknown origin.")
-    if db.scalar(select(Meeting.id).where(Meeting.status.in_(["queued", "processing"])).limit(1)):
-        raise HTTPException(
-            409, "Wait for meeting processing to finish before changing AI settings."
-        )
+    ensure_idle(db)
     key = body.api_key.get_secret_value().strip()
     if not key or len(key) > 500:
         raise HTTPException(422, "Enter a valid Anthropic API key.")
@@ -295,3 +295,60 @@ def connect_anthropic(body: AIConnection, request: Request, db: Session = Depend
     settings.anthropic_api_key = SecretStr(key)
     settings.ai_mode = "anthropic"
     return {"mode": "anthropic", "model": settings.anthropic_model}
+
+
+def key_hint(secret: SecretStr) -> str | None:
+    """Last four characters only, so the user can tell which key is active."""
+    value = secret.get_secret_value()
+    return f"…{value[-4:]}" if len(value) >= 12 else ("…" if value else None)
+
+
+def ensure_idle(db: Session):
+    if db.scalar(select(Meeting.id).where(Meeting.status.in_(["queued", "processing"])).limit(1)):
+        raise HTTPException(
+            409, "Wait for meeting processing to finish before changing AI settings."
+        )
+
+
+@app.get("/api/settings", dependencies=[Depends(local_request)])
+def connection_settings():
+    return {
+        "ai": {
+            "mode": settings.ai_mode,
+            "model": settings.anthropic_model
+            if settings.ai_mode == "anthropic"
+            else settings.llm_model
+            if settings.ai_mode == "openai"
+            else None,
+            "key_hint": key_hint(settings.anthropic_api_key)
+            if settings.ai_mode == "anthropic"
+            else key_hint(settings.openai_api_key)
+            if settings.ai_mode == "openai"
+            else None,
+        },
+        "voice": {
+            "connected": bool(settings.elevenlabs_api_key.get_secret_value()),
+            "key_hint": key_hint(settings.elevenlabs_api_key),
+            "voice_id": settings.elevenlabs_voice_id,
+        },
+    }
+
+
+@app.delete("/api/settings/anthropic", dependencies=[Depends(local_request)])
+def disconnect_anthropic(db: Session = Depends(get_db)):
+    ensure_idle(db)
+    # Session-only removal: a key in .env is read again on the next backend restart.
+    settings.anthropic_api_key = SecretStr("")
+    if settings.ai_mode == "anthropic":
+        settings.ai_mode = "demo"
+    return {"mode": settings.ai_mode}
+
+
+@app.delete("/api/settings/elevenlabs", dependencies=[Depends(local_request)])
+def disconnect_elevenlabs():
+    settings.elevenlabs_api_key = SecretStr("")
+    return {"connected": False}
+
+
+# Last, so the optional built frontend never shadows an /api route.
+configure_hosting(app, settings)

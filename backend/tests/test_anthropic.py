@@ -130,3 +130,31 @@ def test_anthropic_ingests_and_answers_without_embedding_api(client, database, m
     assert response.status_code == 200
     assert response.json()["content"] == "Sam owns the security review."
     assert "Sam" in response.json()["citations"][0]["text"]
+
+
+def test_settings_status_masks_keys_and_removal_returns_to_demo(client, monkeypatch):
+    import app.voice as voice
+
+    current = Settings(
+        ai_mode="anthropic",
+        anthropic_api_key="sk-ant-test-only-abcd",
+        elevenlabs_api_key="xi-test-only-wxyz",
+    )
+    monkeypatch.setattr(main, "settings", current)
+    monkeypatch.setattr(voice, "settings", current)
+    local = {"X-Local-Settings": "1"}
+    assert client.get("/api/settings").status_code == 403
+    response = client.get("/api/settings", headers=local)
+    assert response.json()["ai"] == {
+        "mode": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "key_hint": "…abcd",
+    }
+    assert response.json()["voice"]["key_hint"] == "…wxyz"
+    assert "test-only" not in response.text
+
+    assert client.delete("/api/settings/anthropic").status_code == 403
+    assert client.delete("/api/settings/anthropic", headers=local).json() == {"mode": "demo"}
+    assert current.ai_mode == "demo" and not current.anthropic_api_key.get_secret_value()
+    assert client.delete("/api/settings/elevenlabs", headers=local).json() == {"connected": False}
+    assert not current.elevenlabs_api_key.get_secret_value()

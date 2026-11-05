@@ -66,13 +66,6 @@ export function Sidebar({
           <span className="sidebar-label">Upload transcript</span>
         </button>
       </nav>
-      <div className="sidebar-account">
-        <span className="avatar">P</span>
-        <div className="sidebar-label">
-          <strong>Personal workspace</strong>
-          <small>Meeting intelligence</small>
-        </div>
-      </div>
       <div className="sidebar-bottom-tools">
         <button
           className="sidebar-nav-item"
