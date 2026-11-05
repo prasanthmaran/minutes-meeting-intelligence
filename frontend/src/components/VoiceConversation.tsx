@@ -27,8 +27,12 @@ export function VoiceConversation({
   onTurn: (question: string, answer: Message) => void;
 }) {
   const [state, setState] = useState<ConversationState>("idle");
-  const [heard, setHeard] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [transcript, setTranscript] = useState<{ role: string; text: string }[]>([]);
+  const logBottom = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (transcript.length)
+      logBottom.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [transcript]);
   const [error, setError] = useState("");
   const engine = useRef<Conversation | null>(null);
   const mounted = useRef(true);
@@ -53,8 +57,7 @@ export function VoiceConversation({
   async function start() {
     if (engine.current) return;
     setError("");
-    setHeard("");
-    setAnswer("");
+    setTranscript([]);
     const mic = new BrowserMicrophone();
     const conversation = new Conversation(
       {
@@ -140,10 +143,14 @@ export function VoiceConversation({
         }
       },
       text => {
-        if (mounted.current) setHeard(text);
+        if (mounted.current) {
+          setTranscript(t => [...t, { role: "You", text }]);
+        }
       },
       text => {
-        if (mounted.current) setAnswer(text);
+        if (mounted.current) {
+          setTranscript(t => [...t, { role: "Minutes", text }]);
+        }
       },
       message => {
         if (mounted.current) setError(message);
@@ -201,18 +208,29 @@ export function VoiceConversation({
           Use Chrome, Edge, or Safari on localhost/HTTPS with microphone access.
         </p>
       )}
-      {heard && (
-        <p className="conversation-line">
-          <b>You</b>
-          {heard}
-        </p>
-      )}
-      {answer && (
-        <p className="conversation-line">
-          <b>Assistant</b>
-          {answer}
-        </p>
-      )}
+      <div
+        className="agent-conversation-log"
+        aria-label="Voice conversation transcript"
+        aria-live="polite"
+      >
+        {!transcript.length ? (
+          <div className="agent-empty-transcript">
+            <span>YOUR CONVERSATION</span>
+            <p>Try “What did we decide?” or “Who owns the next step?”</p>
+          </div>
+        ) : (
+          transcript.map((item, i) => (
+            <article
+              key={i}
+              className={item.role === "You" ? "agent-user-line" : "agent-assistant-line"}
+            >
+              <b>{item.role}</b>
+              <p>{item.text}</p>
+            </article>
+          ))
+        )}
+        <div ref={logBottom} />
+      </div>
       {error && (
         <p role="alert" className="voice-error">
           {error}

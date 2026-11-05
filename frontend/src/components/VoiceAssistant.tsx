@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Loader2, Mic, Square, Volume2 } from "lucide-react";
+import { AudioLines, Loader2, Mic, Square, Volume2, X } from "lucide-react";
 import { api } from "../api";
 import type { Message } from "../types";
 import { VoiceConversation } from "./VoiceConversation";
@@ -18,8 +18,12 @@ export function VoiceAssistant({
   onConversationActive,
   onConversationTurn,
   onAISettings,
+  meetingTitle,
+  onAIStatus,
 }: {
   meetingId: string;
+  meetingTitle?: string;
+  onAIStatus?: (mode: string) => void;
   ready: boolean;
   aiEnabled: boolean;
   onQuestion: (text: string) => void;
@@ -33,6 +37,8 @@ export function VoiceAssistant({
 }) {
   const [open, setOpen] = useState(false);
   const [conversationActive, setConversationActive] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const agentClose = useRef<HTMLButtonElement>(null);
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
   const [working, setWorking] = useState(false);
@@ -48,6 +54,11 @@ export function VoiceAssistant({
   const supported =
     typeof window.MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
   useEffect(() => {
+    api<{ mode: string }>("/health")
+      .then(s => {
+        if (s.mode) onAIStatus?.(s.mode);
+      })
+      .catch(() => {});
     api<VoiceStatus>("/voice/status")
       .then(s => setConnected(s.connected))
       .catch(() => setConnected(false));
@@ -77,6 +88,12 @@ export function VoiceAssistant({
         if (mounted.current) setNotice("Your spoken answer is ready. Press Play to listen.");
       });
   }, [audioUrl]);
+  useEffect(() => {
+    if (!agentOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    agentClose.current?.focus();
+    return () => previous?.focus();
+  }, [agentOpen]);
   function stop() {
     if (timer.current) clearTimeout(timer.current);
     if (recorder.current?.state === "recording") recorder.current.stop();
@@ -195,6 +212,86 @@ export function VoiceAssistant({
         <strong>Voice assistant</strong>
         <span>{connected ? "ElevenLabs connected" : "Connect ElevenLabs"}</span>
       </button>
+      {agentOpen && (
+        <div className="agent-backdrop">
+          <section
+            className="agent-window"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="voice-agent-title"
+            onKeyDown={e => {
+              if (e.key === "Escape") setAgentOpen(false);
+              if (e.key === "Tab") {
+                const controls = [
+                  ...e.currentTarget.querySelectorAll<HTMLElement>(
+                    "button:not(:disabled),a[href],input:not(:disabled)"
+                  ),
+                ];
+                const first = controls[0],
+                  last = controls.at(-1);
+                if (e.shiftKey && document.activeElement === first) {
+                  e.preventDefault();
+                  last?.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                  e.preventDefault();
+                  first?.focus();
+                }
+              }
+            }}
+          >
+            <header className="agent-window-header">
+              <span className="agent-brand">
+                <AudioLines size={20} />
+              </span>
+              <div>
+                <h2 id="voice-agent-title">Minutes voice agent</h2>
+                <p>Powered by ElevenLabs</p>
+              </div>
+              <button
+                ref={agentClose}
+                aria-label="Close voice agent and end conversation"
+                title="Close and end conversation"
+                onClick={() => setAgentOpen(false)}
+              >
+                <X size={21} />
+              </button>
+            </header>
+            <div className="agent-context">
+              <span>MEETING CONTEXT</span>
+              <strong>{meetingTitle ?? "Selected meeting"}</strong>
+            </div>
+            <div className="agent-window-body">
+              {!aiEnabled && (
+                <div className="agent-setup-warning">
+                  <p>Connect the AI that answers your questions before starting.</p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setAgentOpen(false);
+                      onAISettings();
+                    }}
+                  >
+                    Connect Claude
+                  </Button>
+                </div>
+              )}
+              <VoiceConversation
+                meetingId={meetingId}
+                disabled={!ready || !aiEnabled || sending || recording || working}
+                onActive={active => {
+                  if (active) player.current?.pause();
+                  setConversationActive(active);
+                  onConversationActive(active);
+                }}
+                onTurn={onConversationTurn}
+              />
+              <p className="agent-sources-note">
+                Answers and evidence citations are saved in the meeting chat.
+              </p>
+            </div>
+          </section>
+        </div>
+      )}
       {open && (
         <div className="voice-panel">
           {!connected ? (
@@ -214,16 +311,20 @@ export function VoiceAssistant({
                   </button>
                 </p>
               )}
-              <VoiceConversation
-                meetingId={meetingId}
-                disabled={!ready || !aiEnabled || sending || recording || working}
-                onActive={active => {
-                  if (active) player.current?.pause();
-                  setConversationActive(active);
-                  onConversationActive(active);
-                }}
-                onTurn={onConversationTurn}
-              />
+              <div className="agent-launch">
+                <div className="agent-launch-icon">
+                  <AudioLines size={25} />
+                </div>
+                <strong>Talk to your meeting</strong>
+                <p>A two-way voice conversation, with answers grounded in this transcript.</p>
+                <Button
+                  onClick={() => setAgentOpen(true)}
+                  disabled={recording || working || sending}
+                >
+                  <Mic size={17} />
+                  Open conversation agent
+                </Button>
+              </div>
               <details className="manual-voice">
                 <summary>Manual voice controls</summary>
                 <div className="voice-buttons">

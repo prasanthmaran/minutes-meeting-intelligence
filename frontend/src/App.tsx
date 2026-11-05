@@ -610,6 +610,8 @@ export default function App() {
                 <VoiceAssistant
                   key={detail.id}
                   meetingId={detail.id}
+                  meetingTitle={detail.title}
+                  onAIStatus={setMode}
                   ready={!!ready}
                   aiEnabled={mode !== "demo" && !!mode}
                   sending={sending}

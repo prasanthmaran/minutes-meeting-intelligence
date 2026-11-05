@@ -9,7 +9,7 @@ Status checked on November 5, 2026. The prototype is implemented; a live provide
 - [x] Demo excerpt search and OpenAI / Anthropic answer-generation integration.
 - [x] Conversation history, follow-up query rewriting, structured meeting notes and citation validation.
 - [x] Session-only Claude connection dialog with an actual provider access check.
-- [x] Local automated checks previously passed: 35 backend tests, 18 frontend tests, production build.
+- [x] Local automated checks previously passed: 35 backend tests, 20 frontend tests, production build.
 - [x] README, architecture, trade-offs, productionization notes, sample transcript and screenshots.
 
 ## Required before submission

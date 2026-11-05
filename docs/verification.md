@@ -3,7 +3,7 @@
 ## Verified locally
 
 - 35 backend automated tests passed, including simulated AI orchestration and invalid-citation rejection.
-- 18 frontend tests passed; TypeScript and production build passed.
+- 20 frontend tests passed; TypeScript and production build passed.
 - SQLite migration upgrade → downgrade → upgrade.
 - Browser: sample upload, processing to ready, transcript viewer, persisted chat, clickable evidence, and unsupported-topic response in demo mode.
 - Frontend dependency audit: zero reported vulnerabilities after test-tooling upgrades.
@@ -57,3 +57,5 @@ Implemented voice connection settings, audio transcription, and speech synthesis
 Added an automatic listening → transcription → cited answer → speech → listening loop, an animated status indicator, End, and manual playback interruption. Deterministic tests cover the full turn loop, resuming listening after an interruption, aborting pending transcription without submitting stale questions, provider failures, and speech/silence segmentation. These tests are not evidence of live microphone or end-to-end acoustic quality. The current runtime still requires a live AI connection in addition to ElevenLabs; microphone access is activated only by the user's Start button.
 
 Live speech generation check: the connected ElevenLabs account returned a valid MP3 for the supplied Atlas sample answer. The test did not activate the microphone or use private meeting text. Claude was in demo mode during this check, so a complete spoken-question-to-answer cycle was not claimed.
+
+Conversation-agent window: added a dedicated meeting-scoped modal with a full session transcript, setup action, focus handling, and safe close/Escape cleanup. Frontend tests cover modal discovery/closing and the missing-AI setup path. No new backend restart was needed for this UI update.

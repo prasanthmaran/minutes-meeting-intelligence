@@ -48,7 +48,7 @@ it("reports microphone denial without sending audio", async () => {
       }),
     },
   });
-  const fetch = vi.fn(async () => ({
+  const fetch = vi.fn(async (_url: string) => ({
     ok: true,
     status: 200,
     json: async () => ({ connected: true }),
@@ -59,5 +59,36 @@ it("reports microphone denial without sending audio", async () => {
   fireEvent.click(await screen.findByText("Manual voice controls"));
   fireEvent.click(await screen.findByRole("button", { name: "Ask by voice" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Microphone permission was denied");
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.every(call => !String(call[0]).includes("/transcribe"))).toBe(true);
+});
+
+it("opens a dedicated agent window and closes it safely", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith("/health") ? { mode: "anthropic" } : { connected: true }),
+    }))
+  );
+  render(<VoiceAssistant {...props} meetingTitle="Atlas review" />);
+  fireEvent.click(screen.getByRole("button", { name: /Voice assistant/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open conversation agent" }));
+  expect(await screen.findByRole("dialog", { name: "Minutes voice agent" })).toBeInTheDocument();
+  expect(screen.getByText("Atlas review")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Start conversation" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close voice agent and end conversation" }));
+  expect(screen.queryByRole("dialog", { name: "Minutes voice agent" })).not.toBeInTheDocument();
+});
+it("provides AI setup inside the agent when the reasoning connection is missing", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ connected: true }) }))
+  );
+  render(<VoiceAssistant {...props} aiEnabled={false} />);
+  fireEvent.click(screen.getByRole("button", { name: /Voice assistant/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open conversation agent" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Connect Claude" }));
+  expect(props.onAISettings).toHaveBeenCalled();
+  expect(screen.queryByRole("dialog", { name: "Minutes voice agent" })).not.toBeInTheDocument();
 });

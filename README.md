@@ -48,7 +48,7 @@ Docker is not needed for local development. The existing `compose.yaml` packages
 
 1. Open **Settings → Voice · ElevenLabs**, enter a valid replacement ElevenLabs key, and click **Connect ElevenLabs**. The key needs voice-read, speech-to-text, and text-to-speech access. The app verifies voice-read access; STT/TTS permissions and credits are checked when used.
 2. Connect Claude in **Settings → AI connection** if needed, then open a ready meeting.
-3. Expand **Voice assistant** above the meeting chat and press **Start conversation**. Allow microphone access. Speak a question and pause: local silence detection commits the turn after approximately 1.2 seconds of silence following speech.
+3. Expand **Voice assistant**, click **Open conversation agent**, then press **Start conversation**. Allow microphone access. Speak a question and pause: local silence detection commits the turn after approximately 1.2 seconds of silence following speech.
 4. The app transcribes the question, submits it to the same meeting-scoped answer endpoint, generates speech, plays the answer automatically, and returns to **Listening**. Both sides of the conversation and citations appear in chat.
 5. **Interrupt & speak** stops playback and starts another listening turn. **End conversation** aborts local pending requests/playback and releases microphone access. Switching meetings also ends the session. A server-side generation already underway can still complete after client cancellation.
 
@@ -186,3 +186,5 @@ Submission readiness and remaining work: [submission checklist](docs/submission-
 Live Claude verification: four sample checks passed (owner/deadline, follow-up, unsupported budget, proposed versus approved metric). See [the recorded evaluation](docs/evaluations/claude-core-2026-11-05.json) for actual responses and scope.
 
 Navigation: the home screen lists meetings with title/participant search and a status filter. Select a meeting to open its details; **Back to meetings**, browser Back/Forward, and bookmarked `#/meetings/<id>` URLs are supported. The sidebar collapse handle sits on the top divider beside the logo, and the preference is saved locally. AI connection status and credentials are managed through **Settings**.
+
+The dedicated voice-agent window displays the selected meeting, an animated status orb, a live transcript, and Start/Interrupt/End controls. Closing the window or pressing Escape ends the session and releases the microphone. The agent offers direct AI setup when the reasoning connection is missing.
