@@ -64,6 +64,7 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(false);
   const [evidence, setEvidence] = useState<Source | null>(null);
@@ -612,6 +613,24 @@ export default function App() {
                   ready={!!ready}
                   aiEnabled={mode !== "demo" && !!mode}
                   sending={sending}
+                  onAISettings={() => {
+                    setSettingsTab("ai");
+                    setAISettings(true);
+                  }}
+                  onConversationActive={setVoiceActive}
+                  onConversationTurn={(question, answer) => {
+                    if (current.current === detail.id)
+                      setMessages(history => [
+                        ...history,
+                        {
+                          id: `voice-${answer.id}`,
+                          role: "user",
+                          content: question,
+                          citations: [],
+                        },
+                        answer,
+                      ]);
+                  }}
                   settingsVersion={voiceSettingsVersion}
                   lastAnswer={[...messages].reverse().find(m => m.role === "assistant") ?? null}
                   onQuestion={setQuestion}
@@ -631,7 +650,7 @@ export default function App() {
                       <div className="suggestions">
                         {prompts.map(prompt => (
                           <button
-                            disabled={!ready || sending}
+                            disabled={!ready || sending || voiceActive}
                             key={prompt}
                             onClick={() => send(prompt)}
                           >
@@ -702,7 +721,7 @@ export default function App() {
                     }}
                     placeholder="What would you like to know?"
                     maxLength={2000}
-                    disabled={!ready || sending}
+                    disabled={!ready || sending || voiceActive}
                     rows={2}
                   />
                   <div>
@@ -711,7 +730,7 @@ export default function App() {
                     </span>
                     <Button
                       aria-label="Send question"
-                      disabled={!ready || sending || !question.trim()}
+                      disabled={!ready || sending || voiceActive || !question.trim()}
                     >
                       <Send size={16} />
                     </Button>

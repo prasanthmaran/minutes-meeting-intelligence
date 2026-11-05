@@ -14,6 +14,9 @@ const props = {
   settingsVersion: 0,
   lastAnswer: null,
   sending: false,
+  onConversationActive: vi.fn(),
+  onConversationTurn: vi.fn(),
+  onAISettings: vi.fn(),
 };
 it("shows an accessible route to ElevenLabs settings before enabling voice", async () => {
   vi.stubGlobal(
@@ -32,6 +35,7 @@ it("requires a generated answer for speech playback", async () => {
   );
   render(<VoiceAssistant {...props} />);
   fireEvent.click(screen.getByRole("button", { name: /Voice assistant/ }));
+  fireEvent.click(await screen.findByText("Manual voice controls"));
   expect(await screen.findByRole("button", { name: "Speak latest answer" })).toBeDisabled();
 });
 
@@ -52,6 +56,7 @@ it("reports microphone denial without sending audio", async () => {
   vi.stubGlobal("fetch", fetch);
   render(<VoiceAssistant {...props} />);
   fireEvent.click(screen.getByRole("button", { name: /Voice assistant/ }));
+  fireEvent.click(await screen.findByText("Manual voice controls"));
   fireEvent.click(await screen.findByRole("button", { name: "Ask by voice" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Microphone permission was denied");
   expect(fetch).toHaveBeenCalledTimes(1);

@@ -9,7 +9,7 @@ Status checked on November 5, 2026. The prototype is implemented; a live provide
 - [x] Demo excerpt search and OpenAI / Anthropic answer-generation integration.
 - [x] Conversation history, follow-up query rewriting, structured meeting notes and citation validation.
 - [x] Session-only Claude connection dialog with an actual provider access check.
-- [x] Local automated checks previously passed: 35 backend tests, 13 frontend tests, production build.
+- [x] Local automated checks previously passed: 35 backend tests, 18 frontend tests, production build.
 - [x] README, architecture, trade-offs, productionization notes, sample transcript and screenshots.
 
 ## Required before submission
@@ -30,4 +30,4 @@ Automatic meeting attendance, calendar integration, meeting-recording transcript
 
 Live core verification: four sample checks passed on November 5; see `evaluations/claude-core-2026-11-05.json`. Complete the remaining quality cases before claiming broader coverage.
 
-Voice assistant implementation is available under Settings → Voice · ElevenLabs and within meeting chat. Live ElevenLabs recording/playback still needs verification with a replacement key entered locally.
+Voice assistant implementation is available under Settings → Voice · ElevenLabs and within meeting chat. Live ElevenLabs speech generation is verified. Real microphone transcription and the complete conversation loop still need user testing with Claude and ElevenLabs connected.

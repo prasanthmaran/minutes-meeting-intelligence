@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AudioLines, Loader2, Mic, Square, Volume2 } from "lucide-react";
 import { api } from "../api";
 import type { Message } from "../types";
+import { VoiceConversation } from "./VoiceConversation";
 import { Button } from "./ui/button";
 
 type VoiceStatus = { connected: boolean };
@@ -14,6 +15,9 @@ export function VoiceAssistant({
   settingsVersion,
   lastAnswer,
   sending,
+  onConversationActive,
+  onConversationTurn,
+  onAISettings,
 }: {
   meetingId: string;
   ready: boolean;
@@ -23,8 +27,12 @@ export function VoiceAssistant({
   settingsVersion: number;
   lastAnswer: Message | null;
   sending: boolean;
+  onConversationActive: (active: boolean) => void;
+  onConversationTurn: (question: string, answer: Message) => void;
+  onAISettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [conversationActive, setConversationActive] = useState(false);
   const [connected, setConnected] = useState(false);
   const [recording, setRecording] = useState(false);
   const [working, setWorking] = useState(false);
@@ -178,6 +186,7 @@ export function VoiceAssistant({
         className="voice-toggle"
         aria-expanded={open}
         onClick={() => {
+          if (conversationActive) return;
           if (recording) stop();
           setOpen(!open);
         }}
@@ -197,53 +206,67 @@ export function VoiceAssistant({
             </>
           ) : (
             <>
-              <p>
-                Record a question (up to 60 seconds), review the transcription, and send it. Then
-                generate a spoken reply.
-              </p>
               {!aiEnabled && (
                 <p className="voice-warning">
                   Connect Claude or OpenAI in Settings to answer your questions first.
+                  <button className="text-button" onClick={onAISettings}>
+                    Open AI settings
+                  </button>
                 </p>
               )}
-              <div className="voice-buttons">
-                <Button
-                  variant="outline"
-                  disabled={
-                    !ready || !aiEnabled || (!recording && (working || sending || !supported))
-                  }
-                  onClick={recording ? stop : start}
-                >
-                  {recording ? <Square size={16} /> : <Mic size={16} />}{" "}
-                  {recording ? "Stop recording" : "Ask by voice"}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={!lastAnswer || recording || working || sending}
-                  onClick={listen}
-                >
-                  <Volume2 size={16} />
-                  Speak latest answer
-                </Button>
-              </div>
-              {!supported && (
-                <p className="voice-warning">
-                  Microphone recording needs a supported browser on localhost or HTTPS.
-                </p>
-              )}
-              {recording && (
-                <p className="recording-indicator" role="status">
-                  ● Recording… press Stop when finished.
-                </p>
-              )}
-              {working && (
-                <p role="status">
-                  <Loader2 size={14} className="spin" /> Processing voice…
-                </p>
-              )}
-              <small>
-                Uses ElevenLabs credits. Audio questions and answer text are sent to ElevenLabs.
-              </small>
+              <VoiceConversation
+                meetingId={meetingId}
+                disabled={!ready || !aiEnabled || sending || recording || working}
+                onActive={active => {
+                  if (active) player.current?.pause();
+                  setConversationActive(active);
+                  onConversationActive(active);
+                }}
+                onTurn={onConversationTurn}
+              />
+              <details className="manual-voice">
+                <summary>Manual voice controls</summary>
+                <div className="voice-buttons">
+                  <Button
+                    variant="outline"
+                    disabled={
+                      !ready ||
+                      !aiEnabled ||
+                      (!recording && (working || sending || conversationActive || !supported))
+                    }
+                    onClick={recording ? stop : start}
+                  >
+                    {recording ? <Square size={16} /> : <Mic size={16} />}{" "}
+                    {recording ? "Stop recording" : "Ask by voice"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={!lastAnswer || recording || working || sending || conversationActive}
+                    onClick={listen}
+                  >
+                    <Volume2 size={16} />
+                    Speak latest answer
+                  </Button>
+                </div>
+                {!supported && (
+                  <p className="voice-warning">
+                    Microphone recording needs a supported browser on localhost or HTTPS.
+                  </p>
+                )}
+                {recording && (
+                  <p className="recording-indicator" role="status">
+                    ● Recording… press Stop when finished.
+                  </p>
+                )}
+                {working && (
+                  <p role="status">
+                    <Loader2 size={14} className="spin" /> Processing voice…
+                  </p>
+                )}
+                <small>
+                  Uses ElevenLabs credits. Audio questions and answer text are sent to ElevenLabs.
+                </small>
+              </details>
             </>
           )}
           {notice && (

@@ -48,11 +48,13 @@ Docker is not needed for local development. The existing `compose.yaml` packages
 
 1. Open **Settings → Voice · ElevenLabs**, enter a valid replacement ElevenLabs key, and click **Connect ElevenLabs**. The key needs voice-read, speech-to-text, and text-to-speech access. The app verifies voice-read access; STT/TTS permissions and credits are checked when used.
 2. Connect Claude in **Settings → AI connection** if needed, then open a ready meeting.
-3. Expand **Voice assistant** above the meeting chat. Click **Ask by voice**, allow microphone access, speak, and click **Stop recording**. Recordings stop automatically at 60 seconds and are limited to 5 MB.
-4. Review the transcribed question in the composer, then press **Send**. The existing cited-answer flow handles the question and its follow-ups.
-5. Click **Speak latest answer**. ElevenLabs generates speech; playback starts when the browser permits it, with a Play control available otherwise.
+3. Expand **Voice assistant** above the meeting chat and press **Start conversation**. Allow microphone access. Speak a question and pause: local silence detection commits the turn after approximately 1.2 seconds of silence following speech.
+4. The app transcribes the question, submits it to the same meeting-scoped answer endpoint, generates speech, plays the answer automatically, and returns to **Listening**. Both sides of the conversation and citations appear in chat.
+5. **Interrupt & speak** stops playback and starts another listening turn. **End conversation** aborts local pending requests/playback and releases microphone access. Switching meetings also ends the session. A server-side generation already underway can still complete after client cancellation.
 
-Pipeline: microphone → ElevenLabs Scribe → review question → Claude/OpenAI with meeting evidence → ElevenLabs speech. This is turn-based voice interaction, not a hosted ElevenAgents bot, live meeting participant, or full-duplex realtime session. The UI keeps the text answer and its citations visible.
+The interface displays Connecting, Listening, Understanding, Finding evidence, Preparing voice, and Speaking states. Manual recording/review and playback are still available under **Manual voice controls**.
+
+Pipeline: microphone → local speech/silence detection → ElevenLabs Scribe → Claude/OpenAI with meeting evidence → ElevenLabs speech → playback → listen again. This is automatic two-way turn-taking, not full-duplex audio streaming or a hosted ElevenAgents bot. Interrupting playback requires the Interrupt button; speaking over the assistant does not automatically interrupt it. Latency includes separate STT, answer-generation, and TTS requests. Quiet surroundings help the simple RMS speech gate; no speech for 30 seconds ends the session. An individual spoken turn is capped at 30 seconds and the existing 5 MB upload limit.
 
 Audio recordings and generated audio are not persisted by this app. Audio questions and answer text are sent to ElevenLabs and use account credits; provider retention follows your ElevenLabs account policy. Keys entered through Settings remain only in backend memory until restart. Use ignored `.env` variables `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_STT_MODEL`, and `ELEVENLABS_TTS_MODEL` for local persistent configuration. Microphone recording requires localhost/HTTPS and a compatible browser. Multilingual availability depends on the configured STT/TTS model and voice; not every language has been tested.
 
