@@ -72,3 +72,21 @@ export type TurnMark = {
   emotion_note: string | null;
 };
 export type SpeakerSummary = { speaker: string; summary: string; key_points: string[] };
+export type MeetingStatus = "queued" | "processing" | "ready" | "failed";
+export type MeetingSort = "created_at" | "title" | "duration" | "turns" | "status";
+export type MeetingQuery = {
+  q: string;
+  status: "all" | MeetingStatus;
+  sort: MeetingSort;
+  order: "asc" | "desc";
+  page: number;
+  page_size: number;
+};
+export type MeetingPage = {
+  items: Meeting[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  counts: Record<"all" | MeetingStatus, number>;
+};

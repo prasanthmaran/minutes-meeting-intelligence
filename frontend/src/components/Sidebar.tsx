@@ -58,6 +58,7 @@ export function Sidebar({
         </button>
         <button
           className="sidebar-nav-item"
+          data-tour="upload"
           title="Upload transcript"
           aria-label="Upload transcript"
           onClick={onUpload}
@@ -66,7 +67,7 @@ export function Sidebar({
           <span className="sidebar-label">Upload transcript</span>
         </button>
       </nav>
-      <div className="sidebar-bottom-tools">
+      <div className="sidebar-bottom-tools" data-tour="settings">
         <button
           className="sidebar-nav-item"
           aria-label="Settings"

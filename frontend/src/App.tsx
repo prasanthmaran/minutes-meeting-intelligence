@@ -17,6 +17,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  CircleHelp,
   Users,
   X,
 } from "lucide-react";
@@ -28,10 +29,18 @@ import { EmptyState } from "./components/EmptyState";
 import { TranscriptViews } from "./components/TranscriptViews";
 import { ProcessingProgress } from "./components/ProcessingProgress";
 import { ActionItems } from "./components/ActionItems";
+import { ConfirmDelete } from "./components/ConfirmDelete";
+import {
+  APP_TOUR,
+  MEETING_TOUR,
+  MEETING_TOUR_KEY,
+  ProductTour,
+  TOUR_KEY,
+} from "./components/ProductTour";
 import { Button } from "./components/ui/button";
-import { api, ApiError, clock } from "./api";
+import { api, ApiError, clock, meetingListPath } from "./api";
 import { sample } from "./sample";
-import type { Detail, Meeting, Message, Note, Source } from "./types";
+import type { Detail, Meeting, MeetingPage, MeetingQuery, Message, Note, Source } from "./types";
 
 type Tab = "overview" | "transcript" | "actions";
 const prompts = [
@@ -44,8 +53,29 @@ function meetingFromHash() {
   return window.location.hash.match(/^#\/meetings\/([a-zA-Z0-9-]+)$/)?.[1] ?? null;
 }
 
+const DEFAULT_QUERY: MeetingQuery = {
+  q: "",
+  status: "all",
+  sort: "created_at",
+  order: "desc",
+  page: 1,
+  page_size: 20,
+};
+const EMPTY_PAGE: MeetingPage = {
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: 20,
+  pages: 1,
+  counts: { all: 0, queued: 0, processing: 0, ready: 0, failed: 0 },
+};
+
 export default function App() {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [listQuery, setListQuery] = useState<MeetingQuery>(DEFAULT_QUERY);
+  const [meetingPage, setMeetingPage] = useState<MeetingPage>(EMPTY_PAGE);
+  const [listRefreshing, setListRefreshing] = useState(false);
+  const listQueryRef = useRef(listQuery);
+  listQueryRef.current = listQuery;
   const [selected, setSelected] = useState<string | null>(meetingFromHash);
   const [detail, setDetail] = useState<Detail | null>(null);
   // "missing" = the meeting no longer exists (deleted, or an old link); otherwise a load error.
@@ -77,6 +107,8 @@ export default function App() {
   const [voiceActive, setVoiceActive] = useState(false);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(false);
+  const [tour, setTour] = useState<"app" | "meeting" | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const [evidence, setEvidence] = useState<Source | null>(null);
   const [menu, setMenu] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -109,13 +141,49 @@ export default function App() {
     }
   }, [collapsed]);
 
-  async function loadList() {
-    setMeetings(await api<Meeting[]>("/meetings"));
-  }
+  // First visit: start the product tour once the library has loaded.
   useEffect(() => {
-    Promise.all([api<Meeting[]>("/meetings"), api<{ mode: string }>("/health")])
-      .then(([list, health]) => {
-        setMeetings(list);
+    if (libraryLoading) return;
+    try {
+      if (!window.localStorage.getItem(TOUR_KEY)) setTour(t => t ?? "app");
+    } catch {
+      /* Without storage the tour stays available from the help button. */
+    }
+  }, [libraryLoading]);
+
+  // First ready meeting opened: walk through the meeting page (after the app tour).
+  const meetingReady = detail?.status === "ready" ? detail.id : null;
+  useEffect(() => {
+    if (!meetingReady) return;
+    try {
+      if (window.localStorage.getItem(TOUR_KEY) && !window.localStorage.getItem(MEETING_TOUR_KEY))
+        setTour(t => t ?? "meeting");
+    } catch {
+      /* Without storage the tour stays available from the help button. */
+    }
+  }, [meetingReady]);
+
+  /** Fetch the current page of the meeting list (search, filter, sort and paging run server-side). */
+  async function loadList(query: MeetingQuery = listQueryRef.current) {
+    const page = await api<MeetingPage>(meetingListPath(query));
+    // Ignore responses for a query the user has already changed.
+    if (query === listQueryRef.current) setMeetingPage(page);
+    return page;
+  }
+  const firstListLoad = useRef(true);
+  useEffect(() => {
+    if (firstListLoad.current) {
+      firstListLoad.current = false;
+      return;
+    }
+    setListRefreshing(true);
+    loadList(listQuery)
+      .catch(e => setError((e as Error).message))
+      .finally(() => setListRefreshing(false));
+  }, [listQuery]);
+  useEffect(() => {
+    Promise.all([loadList(), api<{ mode: string }>("/health")])
+      .then(([, health]) => {
         setMode(health.mode);
       })
       .catch(e => setError(e.message))
@@ -220,7 +288,7 @@ export default function App() {
     };
   }, [processingId]);
   useEffect(() => {
-    if (!meetings.some(m => ["queued", "processing"].includes(m.status))) return;
+    if (!meetingPage.counts.queued && !meetingPage.counts.processing) return;
     const interval = setInterval(async () => {
       try {
         await loadList();
@@ -237,7 +305,7 @@ export default function App() {
       }
     }, 1500);
     return () => clearInterval(interval);
-  }, [meetings]);
+  }, [meetingPage.counts.queued, meetingPage.counts.processing]);
   useEffect(() => {
     chatBottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, sending]);
@@ -320,20 +388,19 @@ export default function App() {
       setError((e as Error).message);
     }
   }
-  async function remove() {
-    if (
-      !selected ||
-      !window.confirm("Delete this meeting, its notes, and chat history? This cannot be undone.")
-    )
-      return;
+  function remove() {
+    if (!selected || !detail) return;
+    setMenu(false);
+    setPendingDelete({ id: detail.id, title: detail.title });
+  }
+  /** Used by the meeting list and the meeting page; errors stay in the dialog. */
+  async function deleteMeeting(id: string) {
     setDeleting(true);
     try {
-      await api(`/meetings/${selected}`, { method: "DELETE" });
-      const list = await api<Meeting[]>("/meetings");
-      setMeetings(list);
-      openMeeting(null);
-    } catch (e) {
-      setError((e as Error).message);
+      await api(`/meetings/${id}`, { method: "DELETE" });
+      await loadList();
+      setPendingDelete(null);
+      if (current.current === id) openMeeting(null);
     } finally {
       setDeleting(false);
     }
@@ -453,6 +520,16 @@ export default function App() {
             )}
           </div>
           <div className="topbar-account">
+            <button
+              className="tour-trigger"
+              onClick={() => setTour(selected && detail ? "meeting" : "app")}
+              aria-label={
+                selected && detail ? "Take the meeting page tour" : "Take the product tour"
+              }
+              title={selected && detail ? "Take the meeting page tour" : "Take the product tour"}
+            >
+              <CircleHelp size={18} />
+            </button>
             <div className="topbar-profile" title="Personal workspace">
               <span className="avatar">P</span>
               <div className="topbar-profile-label">
@@ -472,10 +549,14 @@ export default function App() {
         )}
         {!selected ? (
           <MeetingLibrary
-            meetings={meetings}
+            page={meetingPage}
+            query={listQuery}
+            onQueryChange={change => setListQuery(q => ({ ...q, ...change }))}
             loading={libraryLoading}
+            refreshing={listRefreshing}
             onOpen={openMeeting}
             onUpload={() => setModal(true)}
+            onDelete={m => setPendingDelete({ id: m.id, title: m.title })}
             uploading={uploading}
             onSample={() =>
               upload(new File([sample], "Atlas beta launch.txt", { type: "text/plain" }))
@@ -522,7 +603,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            <section className="meeting-header">
+            <section className="meeting-header" data-tour="meeting-header">
               <div className="title-row">
                 <div className="title-block">
                   <div className="title-line">
@@ -545,7 +626,7 @@ export default function App() {
                     <span>Uploaded {date}</span>
                   </div>
                 </div>
-                <div className="header-actions">
+                <div className="header-actions" data-tour="meeting-actions">
                   <Button variant="outline" onClick={exportNotes} disabled={!ready}>
                     <ArrowDownToLine size={15} /> Export notes
                   </Button>
@@ -581,11 +662,12 @@ export default function App() {
             </section>
             <div className="workspace-grid">
               <section className="notes-pane">
-                <div className="tabs" role="tablist" aria-label="Meeting views">
+                <div className="tabs" role="tablist" aria-label="Meeting views" data-tour="tabs">
                   {(["overview", "transcript", "actions"] as Tab[]).map(t => (
                     <button
                       key={t}
                       role="tab"
+                      data-tour={`tab-${t}`}
                       aria-selected={tab === t}
                       onClick={() => setTab(t)}
                       className={tab === t ? "active" : ""}
@@ -735,7 +817,7 @@ export default function App() {
                   )}
                 </div>
               </section>
-              <aside className="chat-pane">
+              <aside className="chat-pane" data-tour="chat">
                 <div className="chat-heading">
                   <span className="chat-symbol">
                     <Sparkles size={17} />
@@ -842,6 +924,7 @@ export default function App() {
                 </div>
                 <form
                   className="composer"
+                  data-tour="ask"
                   onSubmit={(e: FormEvent) => {
                     e.preventDefault();
                     send(question);
@@ -883,6 +966,56 @@ export default function App() {
           </>
         )}
       </main>
+      {pendingDelete && (
+        <ConfirmDelete
+          title={pendingDelete.title}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => deleteMeeting(pendingDelete.id)}
+        />
+      )}
+      {tour === "app" && (
+        <ProductTour
+          steps={APP_TOUR}
+          storageKey={TOUR_KEY}
+          onClose={() => {
+            let next: "meeting" | null = null;
+            try {
+              // Finished the app tour on a meeting page: continue with that page's tour.
+              if (detail?.status === "ready" && !window.localStorage.getItem(MEETING_TOUR_KEY))
+                next = "meeting";
+            } catch {
+              /* Optional preference storage. */
+            }
+            setTour(next);
+          }}
+          missingHint="You’ll find this inside a meeting."
+          secondary={
+            uploading
+              ? null
+              : {
+                  label: "Try the sample",
+                  onClick: () =>
+                    upload(new File([sample], "Atlas beta launch.txt", { type: "text/plain" })),
+                }
+          }
+        />
+      )}
+      {tour === "meeting" && detail && (
+        <ProductTour
+          steps={MEETING_TOUR}
+          storageKey={MEETING_TOUR_KEY}
+          onClose={() => {
+            setTour(null);
+            setTab("overview");
+          }}
+          onStep={step => {
+            if (step.id === "overview" || step.id === "transcript" || step.id === "actions")
+              setTab(step.id);
+          }}
+          finishLabel="Got it"
+          missingHint="This part appears once the meeting is ready."
+        />
+      )}
       {aiSettings && (
         <AISettings
           initialTab={settingsTab}

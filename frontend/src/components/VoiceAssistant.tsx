@@ -196,7 +196,7 @@ export function VoiceAssistant({
     }
   }
   return (
-    <section className="voice-assistant" aria-label="Voice assistant">
+    <section className="voice-assistant" aria-label="Voice assistant" data-tour="voice">
       <button
         className="voice-toggle"
         aria-expanded={open}

@@ -92,7 +92,8 @@ export function TranscriptViews({
     [detail.notes]
   );
   const lengths = useMemo(() => durations(detail.turns), [detail.turns]);
-  const total = Math.max(detail.turns.at(-1)!.seconds + lengths.at(-1)!, 1);
+  const lastTurn = detail.turns.at(-1);
+  const total = Math.max((lastTurn?.seconds ?? 0) + (lengths.at(-1) ?? 0), 1);
   const analysis = detail.notes?.analysis;
   const color = (speaker: string) => `person-color-${detail.speakers.indexOf(speaker) % 4}`;
 

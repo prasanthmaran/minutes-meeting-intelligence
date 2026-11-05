@@ -227,7 +227,7 @@ export function AISettings({
                 </div>
                 <div>
                   <dt>Stored</dt>
-                  <dd>{removable ? "Backend memory · this session" : "Project .env file"}</dd>
+                  <dd>{removable ? "Database · encrypted" : "Project .env file"}</dd>
                 </div>
               </dl>
               <div className="connection-actions">
@@ -328,8 +328,8 @@ export function AISettings({
         <p className="settings-privacy">
           <ShieldCheck size={15} />
           {tab === "voice"
-            ? "Keys stay in backend memory and are cleared on restart. Recorded questions and answer text are sent to ElevenLabs and use your credits."
-            : "Keys stay in backend memory and are cleared on restart. Meeting text and questions are sent to Anthropic when you process or chat."}
+            ? "Keys are stored encrypted in the database and stay connected after restarts. Recorded questions and answer text are sent to ElevenLabs and use your credits."
+            : "Keys are stored encrypted in the database and stay connected after restarts. Meeting text and questions are sent to Anthropic when you process or chat."}
         </p>
       </div>
     </div>

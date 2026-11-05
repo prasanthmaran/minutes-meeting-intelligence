@@ -2,9 +2,41 @@ import { fireEvent, render, screen, waitFor, cleanup } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
 
+/** Mimics GET /api/meetings: server-side search, status filter, counts and page shape. */
+function asPage<T extends { title: string; status: string; speakers: string[] }>(
+  items: T[],
+  url = ""
+) {
+  const params = new URL(url || "/api/meetings", "http://test").searchParams;
+  const q = (params.get("q") ?? "").toLowerCase();
+  const status = params.get("status") ?? "all";
+  const searched = items.filter(m => [m.title, ...m.speakers].join(" ").toLowerCase().includes(q));
+  const shown = searched.filter(m => status === "all" || m.status === status);
+  const count = (s: string) => searched.filter(m => m.status === s).length;
+  return {
+    items: shown,
+    total: shown.length,
+    page: 1,
+    page_size: 20,
+    pages: 1,
+    counts: {
+      all: searched.length,
+      queued: count("queued"),
+      processing: count("processing"),
+      ready: count("ready"),
+      failed: count("failed"),
+    },
+  };
+}
+const isList = (url: string) => url.includes("/api/meetings?");
+
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
-  const stored = new Map<string, string>();
+  // Existing tests run as returning users; the first-run tour has its own tests.
+  const stored = new Map<string, string>([
+    ["minutes.tourCompleted", "true"],
+    ["minutes.meetingTourCompleted", "true"],
+  ]);
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => stored.get(key) ?? null,
     setItem: (key: string, value: string) => stored.set(key, value),
@@ -16,7 +48,8 @@ beforeEach(() => {
     vi.fn(async (url: string) => ({
       ok: true,
       status: 200,
-      json: async () => (url.endsWith("/health") ? { mode: "demo" } : []),
+      json: async () =>
+        url.endsWith("/health") ? { mode: "demo" } : isList(url) ? asPage([], url) : [],
     }))
   );
 });
@@ -84,16 +117,19 @@ function mockMeetings() {
             sources: [],
             notes: { summary: [], decisions: [], actions: [], questions: [] },
           };
-        return [
-          sampleMeeting,
-          {
-            ...sampleMeeting,
-            id: "two",
-            title: "Planning meeting",
-            status: "failed",
-            speakers: ["Leo"],
-          },
-        ];
+        return asPage(
+          [
+            sampleMeeting,
+            {
+              ...sampleMeeting,
+              id: "two",
+              title: "Planning meeting",
+              status: "failed",
+              speakers: ["Leo"],
+            },
+          ],
+          url
+        );
       },
     }))
   );
@@ -104,7 +140,11 @@ it("starts on the list, filters meetings, opens details and returns to the list"
   expect(await screen.findByRole("button", { name: "Launch review" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Back to meetings" })).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Search meetings"), { target: { value: "Sam" } });
-  expect(screen.queryByRole("button", { name: "Planning meeting" })).not.toBeInTheDocument();
+  // Debounced server-side search: the list updates once the API responds.
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Planning meeting" })).not.toBeInTheDocument()
+  );
+  expect(window.fetch).toHaveBeenCalledWith(expect.stringContaining("q=Sam"), undefined);
   fireEvent.click(screen.getByRole("button", { name: "Launch review" }));
   expect(await screen.findByRole("button", { name: "Back to meetings" })).toBeInTheDocument();
   expect(window.location.hash).toBe("#/meetings/one");
@@ -140,13 +180,19 @@ it("filters the list by status and shows a clear empty result", async () => {
   mockMeetings();
   render(<App />);
   await screen.findByRole("button", { name: "Launch review" });
+  expect(screen.getByRole("option", { name: "Failed (1)" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Filter meetings by status"), {
     target: { value: "failed" },
   });
-  expect(screen.queryByRole("button", { name: "Launch review" })).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Launch review" })).not.toBeInTheDocument()
+  );
   expect(screen.getByRole("button", { name: "Planning meeting" })).toBeInTheDocument();
+  expect(window.fetch).toHaveBeenCalledWith(expect.stringContaining("status=failed"), undefined);
   fireEvent.change(screen.getByLabelText("Search meetings"), { target: { value: "not-present" } });
-  expect(screen.getByText("No meetings match your search or status filter.")).toBeInTheDocument();
+  expect(
+    await screen.findByText("No meetings match your search or status filter.")
+  ).toBeInTheDocument();
 });
 
 it("keeps Claude status in Settings instead of the main header", async () => {
@@ -155,7 +201,8 @@ it("keeps Claude status in Settings instead of the main header", async () => {
     vi.fn(async (url: string) => ({
       ok: true,
       status: 200,
-      json: async () => (url.endsWith("/health") ? { mode: "anthropic" } : []),
+      json: async () =>
+        url.endsWith("/health") ? { mode: "anthropic" } : isList(url) ? asPage([], url) : [],
     }))
   );
   render(<App />);
@@ -185,7 +232,8 @@ it("replaces an endless spinner with a recoverable state for a deleted meeting l
         : {
             ok: true,
             status: 200,
-            json: async () => (url.endsWith("/health") ? { mode: "demo" } : []),
+            json: async () =>
+              url.endsWith("/health") ? { mode: "demo" } : isList(url) ? asPage([], url) : [],
           }
     )
   );
@@ -221,7 +269,8 @@ it("imports several transcripts and reports the ones that fail", async () => {
     return {
       ok: true,
       status: 200,
-      json: async () => (url.endsWith("/health") ? { mode: "demo" } : []),
+      json: async () =>
+        url.endsWith("/health") ? { mode: "demo" } : isList(url) ? asPage([], url) : [],
     };
   });
   vi.stubGlobal("fetch", fetch);
@@ -282,8 +331,8 @@ it("streams processing progress and loads the finished meeting", async () => {
       json: async () =>
         url.endsWith("/health")
           ? { mode: "anthropic" }
-          : url.endsWith("/meetings")
-            ? [{ ...meeting, status: ready ? "ready" : "processing" }]
+          : isList(url)
+            ? asPage([{ ...meeting, status: ready ? "ready" : "processing" }], url)
             : url.endsWith("/messages")
               ? []
               : ready
@@ -369,8 +418,8 @@ it("falls back to polling when the event stream is buffered", async () => {
       json: async () =>
         url.endsWith("/health")
           ? { mode: "anthropic" }
-          : url.endsWith("/meetings")
-            ? [processing]
+          : isList(url)
+            ? asPage([processing], url)
             : url.endsWith("/messages")
               ? []
               : processing,
@@ -384,4 +433,141 @@ it("falls back to polling when the event stream is buffered", async () => {
   expect(await screen.findByText("Checking for updates")).toBeInTheDocument();
   expect(screen.getByText("Summarizing 4 speakers")).toBeInTheDocument();
   vi.useRealTimers();
+});
+
+it("shows the six-step product tour on first visit and remembers completion", async () => {
+  window.localStorage.removeItem("minutes.tourCompleted");
+  render(<App />);
+  const tour = await screen.findByRole("dialog", { name: "Welcome to Minutes" });
+  expect(tour).toHaveTextContent("Step 1 of 6");
+  const titles = [
+    "Import transcripts",
+    "Your meeting library",
+    "Connect Claude and voice",
+    "Explore a meeting",
+    "Ask with evidence",
+  ];
+  for (const title of titles) {
+    fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+    expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
+  }
+  expect(screen.getByRole("dialog")).toHaveTextContent("Step 6 of 6");
+  expect(screen.getByRole("button", { name: "Try the sample" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(window.localStorage.getItem("minutes.tourCompleted")).toBe("true");
+});
+
+it("can be skipped with Escape and replayed from the help button", async () => {
+  window.localStorage.removeItem("minutes.tourCompleted");
+  render(<App />);
+  const tour = await screen.findByRole("dialog", { name: "Welcome to Minutes" });
+  fireEvent.keyDown(tour, { key: "ArrowRight" });
+  expect(screen.getByRole("dialog", { name: "Import transcripts" })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Take the product tour" }));
+  expect(screen.getByRole("dialog", { name: "Welcome to Minutes" })).toBeInTheDocument();
+});
+
+it("walks a first-time visitor through the meeting page, switching tabs as it goes", async () => {
+  window.localStorage.removeItem("minutes.meetingTourCompleted");
+  window.history.replaceState(null, "", "/#/meetings/one");
+  mockMeetings();
+  render(<App />);
+  expect(await screen.findByRole("dialog", { name: "Your meeting at a glance" })).toHaveTextContent(
+    "Step 1 of 6"
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+  expect(screen.getByRole("dialog", { name: "Overview" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+  expect(screen.getByRole("dialog", { name: "Transcript, four ways" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Transcript" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+  expect(screen.getByRole("dialog", { name: "Action items" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: /Action items/ })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+  expect(screen.getByRole("dialog", { name: "Ask your meeting" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Next/ }));
+  expect(screen.getByRole("dialog", { name: "Talk to the voice agent" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+  expect(window.localStorage.getItem("minutes.meetingTourCompleted")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Take the meeting page tour" }));
+  expect(screen.getByRole("dialog", { name: "Your meeting at a glance" })).toBeInTheDocument();
+});
+
+it("deletes a meeting from the list after confirmation", async () => {
+  mockMeetings();
+  const base = window.fetch as unknown as (url: string, init?: RequestInit) => Promise<unknown>;
+  const calls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        calls.push(url);
+        return { ok: true, status: 204, json: async () => null };
+      }
+      return base(url, init);
+    })
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Delete Launch review" }));
+  const dialog = screen.getByRole("alertdialog", { name: "Delete “Launch review”?" });
+  expect(dialog).toHaveTextContent("can’t be undone");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(calls).toHaveLength(0);
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Launch review" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete meeting" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  expect(calls).toEqual(["/api/meetings/one"]);
+});
+
+it("sorts and pages through meetings on the server", async () => {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      urls.push(url);
+      const page = Number(new URL(url, "http://t").searchParams.get("page") ?? 1);
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.endsWith("/health")
+            ? { mode: "demo" }
+            : {
+                ...asPage([{ ...sampleMeeting, id: `m${page}`, title: `Meeting on page ${page}` }]),
+                total: 45,
+                page,
+                pages: 3,
+                counts: { all: 45, queued: 0, processing: 0, ready: 45, failed: 0 },
+              },
+      };
+    })
+  );
+  render(<App />);
+  expect(await screen.findByText("1–20 of 45 meetings")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
+  expect(await screen.findByRole("button", { name: "Meeting on page 3" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+
+  fireEvent.click(screen.getByTitle("Sort by meeting"));
+  await waitFor(() => expect(urls.at(-1)).toContain("sort=title&order=asc&page=1"));
+  expect(screen.getByRole("columnheader", { name: /Meeting/ })).toHaveAttribute(
+    "aria-sort",
+    "ascending"
+  );
+  fireEvent.click(screen.getByTitle("Sort by meeting"));
+  await waitFor(() => expect(urls.at(-1)).toContain("sort=title&order=desc"));
+
+  fireEvent.change(screen.getByLabelText("Meetings per page"), { target: { value: "50" } });
+  await waitFor(() => expect(urls.at(-1)).toContain("page_size=50"));
 });

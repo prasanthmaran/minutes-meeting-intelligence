@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -29,7 +30,11 @@ class Meeting(Base):
     mode: Mapped[str] = mapped_column(default="demo")
     embedding_model: Mapped[str | None]
     error: Mapped[str | None] = mapped_column(Text)
-    turns: Mapped[list] = mapped_column(JSON)
+    # Full transcript is loaded only when needed; list views use the summary columns below.
+    turns: Mapped[list] = mapped_column(JSON, deferred=True)
+    speakers: Mapped[list | None] = mapped_column(JSON)
+    duration: Mapped[int | None]
+    turn_count: Mapped[int | None]
     notes: Mapped[dict | None] = mapped_column(JSON)
     # Live processing steps, streamed to the browser while status is queued/processing.
     progress: Mapped[dict | None] = mapped_column(JSON)
@@ -124,8 +129,44 @@ def upgrade_sqlite(target) -> None:
     """Create tables and add columns introduced after a dev SQLite file was created."""
     Base.metadata.create_all(target)
     columns = {c["name"] for c in inspect(target).get_columns("meetings")}
-    added = {"progress": "JSON", "source_text": "TEXT", "source_name": "VARCHAR(255)"}
+    added = {
+        "progress": "JSON",
+        "source_text": "TEXT",
+        "source_name": "VARCHAR(255)",
+        "speakers": "JSON",
+        "duration": "INTEGER",
+        "turn_count": "INTEGER",
+    }
     with target.begin() as connection:
         for name, kind in added.items():
             if name not in columns:
                 connection.execute(text(f"ALTER TABLE meetings ADD COLUMN {name} {kind}"))
+        if "turns" in columns:
+            backfill_summaries(connection)
+
+
+def turn_summary(turns: list[dict]) -> dict:
+    """List-view fields derived once from the transcript, so lists never load turns."""
+    return {
+        "speakers": list(dict.fromkeys(t["speaker"] for t in turns)),
+        "duration": turns[-1]["seconds"] if turns else 0,
+        "turn_count": len(turns),
+    }
+
+
+def backfill_summaries(connection) -> int:
+    """Fill summary columns for meetings created before they existed. Idempotent."""
+    rows = connection.execute(text("SELECT id, turns FROM meetings WHERE turn_count IS NULL")).all()
+    speakers = "CAST(:speakers AS JSON)" if connection.dialect.name == "postgresql" else ":speakers"
+    for meeting_id, turns in rows:
+        if isinstance(turns, str):
+            turns = json.loads(turns)
+        values = turn_summary(turns or [])
+        connection.execute(
+            text(
+                f"UPDATE meetings SET speakers = {speakers}, duration = :duration, "
+                "turn_count = :turn_count WHERE id = :id"
+            ),
+            {**values, "speakers": json.dumps(values["speakers"]), "id": meeting_id},
+        )
+    return len(rows)

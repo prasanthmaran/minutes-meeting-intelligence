@@ -3224,6 +3224,9 @@ h1 {
   grid-template-columns: 120px minmax(480px, 1fr);
   row-gap: 8px;
 }
+.timeline-row {
+  display: contents;
+}
 .timeline-label {
   display: flex;
   align-items: center;
@@ -4041,4 +4044,334 @@ h1 {
     transition: none;
     animation: none;
   }
+}
+
+/* First-run product tour */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+.tour-backdrop {
+  position: absolute;
+  inset: 0;
+  background: #0f172a8c;
+  backdrop-filter: blur(2px);
+}
+.tour-spotlight {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 3px #60a5fa,
+    0 0 0 9999px #0f172a8c;
+  pointer-events: none;
+  transition:
+    top 0.25s ease,
+    left 0.25s ease,
+    width 0.25s ease,
+    height 0.25s ease;
+}
+.tour-card {
+  position: fixed;
+  width: min(360px, calc(100vw - 32px));
+  padding: 18px 18px 14px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px #0f172a40;
+  outline: none;
+  animation: tour-in 0.18s ease-out;
+}
+.tour-card.centered {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 32px));
+}
+.tour-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tour-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #e8f0fe;
+  color: #2563eb;
+}
+.tour-count {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+.tour-close {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  color: #64748b;
+}
+.tour-close:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+.tour-card h2 {
+  margin: 14px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.tour-card p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #475569;
+}
+.tour-card .tour-hint {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: #2563eb;
+}
+.tour-dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+.tour-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  transition: width 0.2s;
+}
+.tour-dots span.done {
+  background: #93c5fd;
+}
+.tour-dots span.on {
+  width: 18px;
+  background: #2563eb;
+}
+.tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+.tour-actions .btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 14px;
+}
+.tour-final {
+  display: flex;
+  gap: 8px;
+}
+.tour-trigger {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  color: #64748b;
+}
+.tour-trigger:hover {
+  background: #eef3fa;
+  color: #2563eb;
+}
+@keyframes tour-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+@media (max-width: 600px) {
+  .tour-card.anchored {
+    top: auto !important;
+    bottom: 16px !important;
+    left: 16px !important;
+    right: 16px;
+    width: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-card,
+  .tour-spotlight,
+  .tour-dots span {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Meeting list: delete action and confirmation */
+.meeting-row-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+.meeting-row-actions > button {
+  vertical-align: middle;
+}
+.meeting-delete-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 4px;
+  padding: 0;
+  border-radius: 8px;
+  color: #94a3b8;
+  opacity: 0.75;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    opacity 0.12s;
+}
+.meeting-table tr:hover .meeting-delete-button,
+.meeting-delete-button:focus-visible {
+  opacity: 1;
+}
+.meeting-delete-button:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.meeting-delete-button:disabled {
+  opacity: 0.35;
+}
+.confirm-dialog {
+  width: min(420px, 100%);
+  padding: 24px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px #0f172a40;
+  text-align: left;
+}
+.confirm-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #dc2626;
+}
+.confirm-dialog h2 {
+  margin: 14px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow-wrap: anywhere;
+}
+.confirm-dialog p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #475569;
+}
+.confirm-dialog .confirm-error {
+  color: #b42318;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.confirm-actions .danger-solid {
+  background: #dc2626;
+}
+.confirm-actions .danger-solid:hover:not(:disabled) {
+  background: #b91c1c;
+}
+.meeting-row-actions .meeting-open-button {
+  display: inline-grid;
+}
+
+/* Meeting list: server-side sorting and pagination */
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.sort-button:hover,
+.sort-button.active {
+  color: #1d4ed8;
+}
+.sort-button .sort-idle {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sort-button:hover .sort-idle,
+.sort-button:focus-visible .sort-idle {
+  opacity: 0.6;
+}
+.meeting-table.is-refreshing tbody {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.library-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+}
+.page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+}
+.page-size select {
+  padding: 4px 8px;
+  border: 1px solid #d5dfef;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+}
+.page-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.page-buttons button {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+.page-buttons button:hover:not(:disabled) {
+  background: #eef3fa;
+}
+.page-buttons button.current {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+.page-gap {
+  padding: 0 4px;
+  color: #94a3b8;
 }

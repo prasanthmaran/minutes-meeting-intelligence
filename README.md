@@ -1,192 +1,130 @@
-# Minutes — Meeting Intelligence
+# Minutes: meeting intelligence
 
-A focused meeting workspace: upload a timestamped transcript, inspect the conversation, and ask questions with clickable source evidence. Built for assignment Option 3.
+Upload a meeting transcript and get a summary, decisions, action items and a chat you can question. Every answer links back to the exact lines in the transcript.
 
-**Status:** Local MVP. Automatic meeting attendance and calendar integration are not implemented. Voice questions and spoken answers are available through ElevenLabs. This is a single-user development app, with no authentication; do not expose it publicly as-is.
+Built for assignment **Option 3: Meeting Intelligence**.
 
-## Quick start
+![Meeting library](docs/screenshots/02-meeting-library.jpg)
 
-### Local development (SQLite; no Docker required)
+> **Status:** proof of concept. One shared workspace with no user accounts. The hosted demo sits behind a single login.
 
-Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and Node.js 22+.
+---
 
-```bash
-cd meeting-intelligence
-cp .env.example .env
-cd backend
-uv sync --frozen
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+## What it does
 
-In another terminal:
-
-```bash
-cd meeting-intelligence/frontend
-npm ci
-npm run dev
-```
-
-Open http://localhost:5173. Vite proxies `/api` to the backend. SQLite persists to `backend/meeting.db`; startup creates its development schema. PostgreSQL uses Alembic migrations, run automatically by the API container. Run only **one API process** for this MVP: its embedded worker recovers interrupted work on startup.
-
-### Enable AI generation
-
-**Claude / Anthropic:** Open **Settings** at the bottom of the sidebar, enter your Anthropic API key in the password field, then click **Connect and enable AI**. A short provider request checks access before enabling AI. The selected meeting is reprocessed automatically. Wait for **ready**, then ask a question. Keys entered in this dialog live only in backend memory and are cleared when the backend restarts. Never paste a key into chat or commit it to Git.
-
-For persistent local configuration, set `AI_MODE=anthropic` and `ANTHROPIC_API_KEY` in the ignored project-root `.env` and restart the backend. `ANTHROPIC_MODEL` defaults to `claude-haiku-4-5-20251001`. Claude mode uses local BM25 retrieval with no embedding API. For meetings whose chunks fit within 14,000 characters, the full discussion is provided so generic questions and later corrections have context; longer meetings use the top matching chunks. This is lexical retrieval, not semantic embeddings. Meeting content is sent to Anthropic for notes and answers.
-
-The settings endpoint is for the loopback-bound, single-user prototype only. It requires a custom request header, checks browser Origin, and does not return or persist the key. It must be authenticated or removed before hosting this app.
-
-**OpenAI:** Set `AI_MODE=openai` and `OPENAI_API_KEY` in the project-root `.env`, then restart the backend. Upload a new transcript or select **Meeting options → Reprocess meeting**; reprocessing clears previous notes and chat history. The key stays on the backend. Transcript contents and questions are sent to OpenAI in this mode.
-
-Demo mode is the default and requires no key. It returns matching transcript excerpts, not generated summaries or conversational answers. Click **Explore a sample** to try it.
-
-### Optional container setup
-
-Docker is not needed for local development. The existing `compose.yaml` packages PostgreSQL/pgvector, the API, and frontend for later use. With a running Docker daemon, `docker compose up --build` serves the app at http://localhost:8080. This path has not been runtime-verified here.
-
-## Voice assistant (ElevenLabs)
-
-Text chat continues to use Claude/OpenAI and validated citations. **Live voice is a separate ElevenLabs Agents conversation**, using WebRTC, streamed speech, automatic turn detection, and spoken interruptions. It does not require the text-chat Claude key.
-
-1. Connect ElevenLabs in Settings. The key needs voice-read plus Agents permissions to create a private agent and mint conversation tokens. Separate STT/TTS permissions are needed only for legacy manual controls.
-2. Open a ready meeting → Voice assistant → Open conversation agent → Start conversation. Allow microphone access.
-3. Speak naturally, interrupt by speaking, or mute/unmute. End or close the window to disconnect. Sessions are limited to ten minutes.
-
-FastAPI creates and reuses a private generic agent per key/voice for the API process. It returns only a short-lived WebRTC token with `Cache-Control: no-store`. Restarting the process may create another agent; remove unused `Minutes live meeting voice v1` agents in ElevenLabs. Production should persist the agent ID and manage configuration migrations.
-
-The agent uses Gemini 2.5 Flash through ElevenLabs and Eleven Flash v2.5 speech, billed through ElevenLabs Agents. Greetings need no evidence tool. Meeting questions invoke a browser client tool that calls the meeting-scoped FastAPI evidence endpoint, so localhost needs no public webhook. Small transcripts (14k characters) are returned completely; larger ones use existing lexical retrieval. No additional Claude generation or query-rewrite request is made. This reduces serial round trips but multilingual lexical retrieval on large meetings remains a limitation.
-
-The prompt requires brief evidence-only spoken answers, abstention when evidence is missing, and treating transcript instructions as untrusted. Retrieved passages appear in the voice window. **These are retrieved evidence, not validated per-sentence citations.** The hosted agent's freeform speech has weaker enforcement than structured text chat; use text chat for auditable decisions. Voice messages are separate and not saved into text-chat history. Closing the window clears the local voice transcript.
-
-Audio and requested evidence are sent to ElevenLabs; provider transcript retention policies apply. Agent audio recording is disabled in configuration. Keys stay server-side in process memory and must be reconnected after a restart (or configured in an ignored local `.env`). End cancels application requests and closes an established SDK session; if connection setup is pending, it is closed as soon as the SDK returns. No microphone session or latency measurement has been claimed from mocked tests.
-
-References: [Agents client SDK](https://elevenlabs.io/docs/eleven-agents/libraries/javascript), [conversation tokens](https://elevenlabs.io/docs/eleven-agents/api-reference/conversations/get-webrtc-token).
-
-## Features
-
-- Optional voice questions and spoken answers via ElevenLabs, with review-before-send.
-- UTF-8 `.txt` upload, with line-specific timestamp/format errors and bounded input size.
-- Meeting library, processing states, retry, and deletion of associated chunks and chat.
-- Speaker-labelled transcript viewer and source evidence panel.
-- AI mode: structured summaries, confirmed decisions, action items, unresolved questions, and conversational answers.
-- Evidence citations validated against the actual retrieved context.
-- Missing action owners/deadlines displayed as “Not specified.”
-- Persistent conversation history and bounded follow-up query rewriting in AI mode.
-- Markdown notes export, including supporting transcript passages.
-- Explicit offline demo, sample transcript, request IDs, provider usage logs, tests, and containers.
-
-Supported input (one speaker turn per line; blank lines allowed):
-
-```text
-[00:00] Maya: Let's review the launch.
-[00:35] Sam: I will finish the security review by November 10.
-[01:02:15] Maya: We agreed to launch only after the review passes.
-```
-
-Limits: 250 KB encoded upload, 60,000 decoded characters, 6,000 characters per turn, chronological timestamps. The displayed duration is the **last recorded timestamp**, not a measured recording length. Dates mentioned in speech remain as spoken; the app does not invent a year or resolve relative deadlines.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  UI[React + TypeScript] --> API[FastAPI]
-  API --> DB[(PostgreSQL + pgvector)]
-  DB --> Worker[Embedded queue worker]
-  Worker --> Parse[Speaker turns → overlapping chunks]
-  Parse --> Embed[Embedding provider]
-  Embed --> DB
-  Parse --> Notes[Structured note extraction]
-  Notes --> DB
-  API --> Retrieve[Meeting-scoped hybrid retrieval]
-  Retrieve --> DB
-  Retrieve --> LLM[Structured answer generation]
-  LLM --> Validate[Citation validation]
-  Validate --> UI
-```
-
-One frontend, one backend process, one database. No agent framework or separate vector service. `app/ai.py` owns provider calls; `transcripts.py` owns parsing/chunking; `intelligence.py` owns retrieval/validation; `worker.py` owns ingestion; `main.py` owns HTTP boundaries. PostgreSQL and SQLite use the same SQLAlchemy models with a dialect-specific embedding column.
-
-Uploads return `202` with a queued meeting. The worker claims queued rows, generates embeddings/notes, and commits the result atomically. Failures roll back partially generated chunks and mark the meeting failed. Queued rows survive restarts; interrupted processing becomes retryable. The UI polls while work is active. This worker is intentionally single-process, not a production distributed job system.
-
-## RAG and LLM decisions implemented
-
-| Area | Implementation and trade-off |
+| Area | What you get |
 |---|---|
-| Chunking | Whole speaker turns, ~1,800 character target, one turn overlap. Preserves attribution and adjacent discussion; characters are a simple approximation, not token-accurate. Oversized turns remain intact within the 6,000-character limit. |
-| Embeddings | `text-embedding-3-small`, explicitly 1,536 dimensions. One hosted provider simplifies setup. Local embeddings would remove embedding API costs but add model download/runtime management. |
-| LLM | Anthropic Claude Haiku 4.5 or configurable OpenAI `gpt-4o-mini` default for structured extraction/answers. This is a starting configuration, not a claim that it wins a model benchmark. Evaluate on your transcripts before selecting a final model. |
-| Vector storage | pgvector alongside relational data. Pinecone/Qdrant would add an operational dependency this corpus does not yet justify. SQLite performs Python cosine ranking for local development. |
-| Retrieval | BM25-style lexical scores plus semantic cosine ranking, combined by reciprocal rank fusion. Top five chunks, up to 14,000 evidence characters in AI mode. Lexical matching helps names and exact terms; vectors help paraphrases. |
-| Scope | Every retrieval query filters by meeting ID. Cross-meeting questions are not supported. No tenant isolation is claimed: the app has one shared workspace. |
-| Context | Last six messages, each capped at 1,600 characters, inform a standalone query rewrite. Retrieved evidence, not past model responses, is the factual source. |
-| Notes | Extract over batches of six chunks; concatenate and deduplicate exact item text. Covers the full transcript without silently dropping its ending. A later decision in another batch can contradict an earlier one: temporal reconciliation is future work. |
-| Orchestration | Plain Python functions and the provider SDK. Avoids hidden retrieval/prompt behavior and framework overhead. |
-| Guardrails | Structured Pydantic output, nonempty/valid citation IDs for supported claims, explicit insufficient-evidence responses, untrusted-source instructions, no tool execution, bounded requests, timeouts. |
-
-Valid citation IDs do **not** prove that a claim follows from the evidence. Prompt injection and unsupported synthesis remain model risks. The prompt asks the model to distinguish proposals from decisions and avoid invented owners/deadlines; this needs live evaluation, not just schema tests. Demo retrieval can return loosely relevant passages and is not semantic reasoning.
-
-Provider documentation used: [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses), [embeddings](https://developers.openai.com/api/docs/guides/embeddings).
-
-## Tests and observability
-
-```bash
-cd backend
-uv run pytest -q
-# In frontend/
-npm test
-npm run build
-```
-
-Backend tests cover format validation, complete chunk coverage/overlap, citation rejection, lexical ranking, meeting isolation, persisted chat, delete cascades, retry cleanup, and provider failure states. Frontend tests cover empty state, honest mode labelling, upload dialog behavior, and API errors. Provider behavior is also tested with doubles; these are **not** live LLM quality evaluations. See `docs/evaluation.md` for human-review cases.
-
-Logs contain request IDs, method, status, latency, meeting IDs, exception type, and provider token counts. They exclude transcript/prompt text and credentials. `GET /api/health` checks database connectivity; it does not spend tokens to probe the model provider. There is no metrics backend or tracing exporter yet.
-
-Engineering practices: typed frontend, validated API bodies and model outputs, separated modules, deterministic tests, pinned dependency lockfiles, migrations, explicit failure states, non-root API container, responsive/keyboard-accessible controls. Skipped: auth, multi-tenant authorization, load tests, a distributed worker, automatic live-provider evals, and a complete accessibility audit.
-
-## Productionization: suggested AWS path
-
-1. Add OIDC sign-in, workspace membership, and server-enforced ownership checks on **every** meeting, source, and chat operation. Add per-user request and token budgets.
-2. Deploy frontend assets behind CloudFront; run the API on ECS/Fargate behind an HTTPS ALB. Run schema migrations as a one-off deployment job.
-3. Use RDS PostgreSQL with pgvector, private networking, connection limits/pooling, encryption, backups, and tested restore procedures. Store large original transcripts in S3 with lifecycle policies.
-4. Replace the embedded worker with SQS and separate ingestion workers. Add job leases, idempotency keys, bounded retries, and a dead-letter queue. Preserve the current separation between provider calls and database writes.
-5. Put API keys in Secrets Manager. Add retention/deletion policies for transcripts, derived data, backups, and the external AI provider. Confirm participant disclosure/consent before adding recording bots.
-6. Add OpenTelemetry/CloudWatch metrics for queue age, processing failures, retrieval latency, provider latency, token cost, and request rate. Redact content by default.
-7. Profile before adding an approximate vector index. Current per-meeting corpora use exact ranking. At scale, test HNSW indexing, filtering behavior, and recall on representative data.
-8. Gate releases with retrieval recall, answer faithfulness, decision-vs-proposal, missing-owner, and prompt-injection evaluations. Version prompts and embedding models; reindex explicitly when they change.
-
-The supplied local database credentials and loopback-bound ports are development configuration, not a deployment security model.
-
-## AI-assisted development and your submission
-
-Implementation, initial tests, UI, and documentation were drafted with Codex. This README describes the delivered implementation and its trade-offs; it is **not** presented as the candidate's personal thought process. Review the code and replace/augment the decision discussion in your own words before submission.
-
-Use `docs/candidate-reflection.md` to record which suggestions you accepted/rejected, which tests you ran, what failed, and why the trade-offs suit your constraints. Do not claim an unrun live-provider evaluation, an unrecorded demo, or a deployment that has not happened.
-
-## With more time
-
-First: authenticated ownership, live quality evaluation, temporal decision reconciliation, and durable independent workers. Next: meeting-bot ingestion with verified webhooks and idempotency, calendar opt-in, meeting-recording transcription, cross-meeting decisions, and streaming chat. Automatic meeting attendance should feed the same ingestion contract rather than introduce a second intelligence pipeline.
-
-## Submission materials
-
-- Source: this directory is self-contained and can become its own GitHub repository. Repository publication status is recorded in `docs/verification.md`.
-- Sample: `samples/Atlas beta launch.txt`.
-- Evaluation checklist: `docs/evaluation.md`.
-- Personal reflection prompts: `docs/candidate-reflection.md`.
-- Loom walkthrough outline: `docs/demo-walkthrough.md` (record the video yourself).
-- Verification results: `docs/verification.md`.
+| **Import** | Upload one or more files: timestamped `.txt`, Otter/Google Meet exports, Zoom/Teams `.vtt`, and `.srt`. Comment lines and untimed transcripts are accepted; for untimed files, times are estimated and marked as such. |
+| **Processing** | Uploads go into a database-backed queue. A live progress view shows each step while Claude reads the meeting. |
+| **Overview** | Summary, confirmed decisions and open questions, each linked to its transcript evidence. |
+| **Transcript** | Four views:<br>• **Conversation**: each turn marked with emoji and labels for questions, decisions, actions, risks, proposals and emotions, with filters.<br>• **By speaker**: collapsible sections with a per-person summary and talk time.<br>• **Timeline**: speaking lanes with marked moments.<br>• **Original**: the uploaded file exactly as received. |
+| **Action items** | Owner, deadline and evidence for each item. Calendar, Email, Jira and PR buttons are placeholders that show where integrations would go. |
+| **Ask your meeting** | Chat about the meeting. Answers cite the passages they used and say so when the transcript doesn't cover the question. Follow-up questions keep context. |
+| **Voice agent** | Talk to the meeting through ElevenLabs Agents, using the same evidence. |
+| **Library** | Server-side search, status filter with counts, sorting, pagination, and delete. |
+| **Onboarding** | A 6-step product tour on first visit, plus a 6-step tour of the meeting page. Replay either with the **?** button. |
+| **Settings** | Connect, replace or remove the Anthropic and ElevenLabs keys. Keys are stored encrypted in the database and stay connected after restarts. |
+| **Languages** | Transcripts in any language, including mixed-language meetings. Notes are written in English; chat answers in the language of the question. |
 
 ## Screenshots
 
-These show the real application in demo mode.
+| | |
+|---|---|
+| ![Welcome tour](docs/screenshots/01-welcome-tour.jpg) First-run tour | ![Meeting overview](docs/screenshots/03-meeting-overview.jpg) Overview and chat |
+| ![Conversation](docs/screenshots/04-transcript-conversation.jpg) Conversation with marks | ![By speaker](docs/screenshots/05-transcript-speakers.jpg) Per-speaker summaries |
+| ![Timeline](docs/screenshots/06-transcript-timeline.jpg) Timeline | ![Original](docs/screenshots/07-transcript-original.jpg) Original file |
+| ![Action items](docs/screenshots/08-action-items.jpg) Action items (integrations are placeholders) | ![Tour: chat](docs/screenshots/09-meeting-tour-chat.jpg) Meeting tour: chat |
+| ![Tour: voice](docs/screenshots/10-meeting-tour-voice.jpg) Meeting tour: voice agent | ![Settings](docs/screenshots/11-settings.jpg) Settings |
 
-![Meeting list with collapsible navigation](docs/screenshots/meeting-library.jpg)
+---
 
-![Meeting details with larger text](docs/screenshots/meeting-details.jpg)
+## Run it locally
 
-Submission readiness and remaining work: [submission checklist](docs/submission-checklist.md).
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22.
 
-Live Claude verification: four sample checks passed (owner/deadline, follow-up, unsupported budget, proposed versus approved metric). See [the recorded evaluation](docs/evaluations/claude-core-2026-11-05.json) for actual responses and scope.
+```bash
+cp .env.example .env          # optional: set DATABASE_URL (SQLite by default, or Supabase)
+./scripts/dev.sh start        # installs, migrates, starts the API on :8000 and the UI on :5173
+```
 
-Navigation: the home screen lists meetings with title/participant search and a status filter. Select a meeting to open its details; **Back to meetings**, browser Back/Forward, and bookmarked `#/meetings/<id>` URLs are supported. The sidebar collapse handle sits on the top divider beside the logo, and the preference is saved locally. AI connection status and credentials are managed through **Settings**.
+Open http://localhost:5173. Then:
+1. Click **Settings** at the bottom of the sidebar and connect your Anthropic key. Without a key the app runs in demo mode, which returns matching excerpts instead of generated notes.
+2. Optionally connect ElevenLabs for the voice agent.
+3. Upload a transcript, or try `samples/Atlas beta launch.txt`.
 
-The dedicated voice-agent window displays the selected meeting, an animated status orb, a live transcript, and Start/Mute/End controls. Closing the window or pressing Escape ends the session and releases the microphone. Live voice connects independently of the text-chat AI provider.
+Other commands: `./scripts/dev.sh status | logs | restart backend | stop`, and `make test`.
+
+## Hosting (POC)
+
+`./scripts/prod.sh start` builds the frontend, runs migrations, and serves everything from one uvicorn process. It is published through a Cloudflare Quick Tunnel (no domain needed) behind HTTP Basic auth. `./scripts/prod.sh deploy` ships changes and keeps the same URL. The full runbook is in [docs/operations.md](docs/operations.md).
+
+---
+
+## How it works
+
+```mermaid
+flowchart LR
+  UI[React + TypeScript] -->|upload| API[FastAPI]
+  API --> DB[(Postgres / Supabase<br/>or SQLite)]
+  DB -->|claim queued meeting| Worker[Queue worker]
+  Worker --> Parse[Parse turns → chunks]
+  Parse --> Claude[Claude: notes, turn marks,<br/>speaker summaries]
+  Claude --> DB
+  Worker -.progress.-> API -.SSE.-> UI
+  UI -->|question| API --> Retrieve[BM25 retrieval<br/>within this meeting] --> Answer[Claude answer] --> Validate[Citation check] --> UI
+  UI -->|voice| EL[ElevenLabs Agent] -->|evidence tool| API
+```
+
+| Part | Implementation |
+|---|---|
+| Backend | FastAPI, SQLAlchemy 2, Alembic migrations (`001`–`006`) |
+| Database | Supabase Postgres (session pooler) for dev and hosted; SQLite (WAL) also supported. Row Level Security is enabled so Supabase's public Data API can't read the tables. |
+| Queue | A background thread polls the `meetings` table and claims work with a conditional `UPDATE`. Progress is stored on the meeting and streamed over Server-Sent Events; the UI falls back to polling when a proxy buffers the stream. |
+| Parsing | Tolerant line parser plus VTT/SRT cues. Whole speaker turns are grouped into ~1,800-character chunks with one turn of overlap. |
+| AI | Claude Haiku 4.5 with structured outputs (Pydantic schemas) for notes, per-turn marks and speaker summaries. |
+| Retrieval | Unicode-aware BM25, always scoped to one meeting. Meetings under 14,000 characters are sent whole. The last six chat messages are used to rewrite follow-up questions. |
+| Citations | Answers must cite chunk IDs from the supplied context; anything else is rejected. |
+| Voice | ElevenLabs Agents over WebRTC. The agent calls a browser tool that fetches evidence from the API. Sessions last up to 10 minutes. |
+| Secrets | Keys are encrypted with Fernet in an `app_settings` table. The encryption key comes from an environment variable or `.secrets/settings.key`. |
+| Frontend | React 19, Vite, lucide icons, hash routing; tested with Vitest and Testing Library. |
+
+## Tests
+
+```bash
+make test        # backend pytest + frontend vitest
+```
+
+Backend tests cover parsing of many formats (including a mixed English/Tamil fixture), chunking, retrieval, citation validation, the queue and progress, encrypted settings, the list API (search, filter, sort, paging), hosting auth, and provider flows using test doubles. Frontend tests cover the library, upload, settings, transcript views, action items, tours and delete.
+
+A live Claude check on the sample meeting is recorded in [docs/evaluations/claude-core-2026-11-05.json](docs/evaluations/claude-core-2026-11-05.json).
+
+## Known limitations
+
+- No user accounts or per-user data isolation; one shared workspace.
+- Queue recovery on startup marks every `processing` meeting as failed. That is wrong if two servers share one database.
+- Retrieval is lexical (BM25), not semantic embeddings. Paraphrased questions can miss.
+- Valid citation IDs don't prove that an answer follows from the cited text.
+- Calendar, Email, Jira and PR buttons are placeholders.
+- The Quick Tunnel URL changes if the host machine restarts or loses its network connection.
+
+---
+
+## My approach and decisions
+
+<!-- TODO (author): write this section in your own words. -->
+
+## Trade-offs
+
+<!-- TODO (author) -->
+
+## What I'd do next / productionization
+
+<!-- TODO (author) -->
+
+## How I used AI tools
+
+<!-- TODO (author) -->
+
+## Demo video
+
+<!-- TODO (author): Loom link -->
